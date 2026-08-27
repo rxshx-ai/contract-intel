@@ -331,6 +331,48 @@ demo live.
 Uploaded contracts live in memory; a server restart reloads only the demo
 portfolio. The extraction cache survives, so re-uploading is immediate.
 
+## Deploying to AWS
+
+```bash
+aws configure                      # you must do this; I will not handle credentials
+open -a Docker                     # daemon must be running
+export GROQ_API_KEY=gsk_...        # optional: demo works without it
+./deploy/aws-apprunner.sh
+```
+
+**App Runner, single instance.** Not Lambda, and not an autoscaled ECS service —
+this app keeps analysis state in memory (`api/main.py` `_state`), writes SQLite
+to the working directory, and caches extractions on local disk. Two replicas
+would answer from two different sets of contracts. Externalising that state to
+Postgres and S3 is real work, not a deployment flag.
+
+What the script does, all from the CLI: creates the ECR repository, builds the
+image **pinned to `linux/amd64`** (App Runner is x86_64; an Apple Silicon
+default build fails to start with an exec-format error), pushes it, creates the
+IAM role App Runner needs to pull from ECR, creates or redeploys the service,
+waits for `RUNNING`, and prints the HTTPS URL.
+
+The image runs `eval/seed_cache.py` at build time and then asserts the demo
+loads, so a broken image fails the build rather than deploying. `GROQ_API_KEY`
+is passed as a runtime environment variable and never baked into the layer.
+
+Rough cost: App Runner bills provisioned memory continuously (~$10/month at
+2 GB) and vCPU only while serving requests, so an idle demo is cheap. Pause it
+between sessions:
+
+```bash
+aws apprunner pause-service --region us-east-1 --service-arn <arn>
+```
+
+Cheaper alternatives if you would rather manage the box: EC2 `t4g.small`
+(~$12/month, and arm64 means a native build on an Apple Silicon Mac) or a
+Lightsail container service at a flat $10/month — both need you to handle TLS
+and process supervision yourself.
+
+**Uploads do not survive a restart** — they live in memory. The seeded demo
+corpus always reloads; anything uploaded during a session is lost. That is the
+same gap listed below, and it matters more once this is hosted.
+
 ## Known gaps
 
 Honest list, since the deliverable is decision support:
