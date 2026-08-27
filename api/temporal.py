@@ -79,16 +79,45 @@ def resolve_term_end(
     return term_end, renewals, steps
 
 
+def next_month_end(today: date) -> date:
+    year, month = (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+    return date(year, month, 1) - timedelta(days=1)
+
+
+def next_quarter_end(today: date) -> date:
+    month = ((today.month - 1) // 3 + 1) * 3
+    year = today.year
+    end = date(year, month, calendar.monthrange(year, month)[1])
+    if end < today:
+        month += 3
+        if month > 12:
+            month, year = month - 12, year + 1
+        end = date(year, month, calendar.monthrange(year, month)[1])
+    return end
+
+
+# Anchors that resolve to a calendar date, and their natural recurrence.
+_IMPLIED_RECURRENCE = {"anniversary": 12, "quarter_end": 3, "month_end": 1}
+
+EVENT_ANCHORS = {"invoice_date", "breach_date", "event"}
+
+
 def _anchor_date(
-    anchor: str, contract: Contract, term_end: date | None
+    anchor: str, contract: Contract, term_end: date | None, today: date
 ) -> tuple[date | None, str]:
     if anchor == "effective_date":
         return contract.effective_date, "Effective Date"
     if anchor == "signature_date":
         return contract.effective_date, "Signature Date (using Effective Date)"
+    if anchor == "anniversary":
+        return contract.effective_date, "anniversary of the Effective Date"
     if anchor in ("term_end", "expiry"):
         return term_end, "end of the then-current Term"
-    return None, anchor  # invoice_date / breach_date are event-driven
+    if anchor == "month_end":
+        return next_month_end(today), "end of the calendar month"
+    if anchor == "quarter_end":
+        return next_quarter_end(today), "end of the calendar quarter"
+    return None, anchor  # event-driven
 
 
 # --------------------------------------------------------------------------
@@ -128,15 +157,22 @@ def materialize(
     horizon = today + timedelta(days=horizon_days)
 
     for rule in rules:
-        anchor_date, anchor_label = _anchor_date(rule.anchor, contract, term_end)
+        anchor_date, anchor_label = _anchor_date(rule.anchor, contract, term_end, today)
         if anchor_date is None:
             unresolved.append(
                 f"{rule.kind}: anchored to '{rule.anchor}', which is event-driven "
-                f"and has not occurred. Deadline is conditional, not calendar-based."
+                f"and has not occurred. Deadline is conditional, not calendar-based. "
+                f"\"{rule.span.quote[:110]}\""
             )
             continue
 
         recurrence = parse_recurrence_months(rule.recurrence)
+        # A quarterly report anchored to quarter_end recurs quarterly even when
+        # the model did not say so. Only RECURRING DELIVERABLES get this: a
+        # one-off notice must never be multiplied into a calendar full of
+        # phantom deadlines just because it references a month end.
+        if recurrence is None and rule.kind == "report":
+            recurrence = _IMPLIED_RECURRENCE.get(rule.anchor)
         occurrences = _occurrences(anchor_date, rule.offset_days, recurrence, today, horizon)
 
         for due in occurrences:
@@ -156,6 +192,7 @@ def materialize(
                     rule_id=rule.id,
                     contract_id=contract.id,
                     kind=rule.kind,
+                    anchor=rule.anchor,
                     due_date=due,
                     owed_by=rule.owed_by,
                     description=rule.consequence or f"{rule.kind} deadline",

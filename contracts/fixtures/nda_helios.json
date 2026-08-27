@@ -3,7 +3,7 @@
   "our_role": "mutual",
   "effective_date_text": "3 February 2026",
   "annual_value": null,
-  "currency": "USD",
+  "currency": null,
   "clauses": [
     {
       "clause_type": "confidentiality",
@@ -15,9 +15,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -30,9 +30,9 @@
       "days": null,
       "months": 60,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -45,9 +45,9 @@
       "days": 10,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -60,9 +60,9 @@
       "days": null,
       "months": 24,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -75,8 +75,8 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
+      "unilateral": null,
+      "survives_termination": null,
       "note": "New York",
       "confidence": 0.95
     }

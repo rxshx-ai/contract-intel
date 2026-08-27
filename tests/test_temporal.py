@@ -149,3 +149,40 @@ def test_obligations_are_sorted_and_next_deadline_picks_the_soonest():
     assert obs == sorted(obs, key=lambda o: o.due_date)
     nxt = next_deadline(obs, today)
     assert nxt is not None and nxt.due_date >= today
+
+
+# -- implied recurrence is deliberately narrow ----------------------------
+
+def test_recurring_report_anchored_to_quarter_end_recurs():
+    obs, _ = materialize(
+        [_rule(kind="report", anchor="quarter_end", offset_days=15, recurrence=None)],
+        _contract(), date(2026, 8, 27), renewal_months=12, horizon_days=365)
+    assert len(obs) >= 3
+    assert all(o.kind == "report" for o in obs)
+
+
+def test_one_off_notice_is_not_multiplied_into_phantom_deadlines():
+    """A single mis-modelled notice must not become a calendar of fake rows."""
+    obs, _ = materialize(
+        [_rule(kind="notice", anchor="month_end", offset_days=-30, recurrence=None)],
+        _contract(), date(2026, 8, 27), renewal_months=12, horizon_days=730)
+    assert len(obs) == 1
+
+
+def test_event_anchored_rule_is_surfaced_as_conditional_not_dropped():
+    obs, unresolved = materialize(
+        [_rule(kind="notice", anchor="event", offset_days=-30)],
+        _contract(), date(2026, 8, 27), renewal_months=12)
+    assert obs == []
+    assert len(unresolved) == 1
+    assert "event-driven" in unresolved[0]
+    assert "MAST" in unresolved[0]      # the quote travels with the reason
+
+
+def test_quarter_and_month_ends_are_calendar_correct():
+    from api.temporal import next_month_end, next_quarter_end
+
+    assert next_month_end(date(2026, 8, 27)) == date(2026, 8, 31)
+    assert next_month_end(date(2026, 12, 5)) == date(2026, 12, 31)
+    assert next_quarter_end(date(2026, 8, 27)) == date(2026, 9, 30)
+    assert next_quarter_end(date(2026, 10, 1)) == date(2026, 12, 31)

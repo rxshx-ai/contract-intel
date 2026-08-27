@@ -98,8 +98,10 @@ def analyze_contract(
     stats = extract_mod.GroundingStats()
     for doc in docs:
         raw = extract_mod.call_model(doc, our_party, use_cache=use_cache)
-        claims, s1 = extract_mod.ground_clauses(raw, doc, contract_id)
-        rules, s2 = extract_mod.ground_rules(raw, doc, contract_id)
+        claims, s1 = extract_mod.ground_clauses(
+            raw, doc, contract_id, our_party, our_role)
+        rules, s2 = extract_mod.ground_rules(
+            raw, doc, contract_id, our_party, our_role)
         claims_by_doc[doc.id] = claims
         all_rules.extend(rules)
         stats = stats.merge(s1).merge(s2)
@@ -203,6 +205,7 @@ def upcoming_deadlines(
                 "contract": bundle.contract.title,
                 "counterparty": bundle.contract.counterparty,
                 "kind": obligation.kind,
+                "anchor": obligation.anchor,
                 "due_date": obligation.due_date.isoformat(),
                 "days_remaining": days,
                 "overdue": days < 0,

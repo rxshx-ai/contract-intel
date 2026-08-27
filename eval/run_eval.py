@@ -86,7 +86,7 @@ def evaluate(self_check: bool) -> int:
     totals = [0, 0, 0]
     grounded_total = dropped_total = 0
     latencies: list[float] = []
-    grounding: list = []
+    provenance: list = []
 
     for filename in EVAL_SET:
         doc: Document = ingest_text((CONTRACTS / filename).read_text(), filename)
@@ -99,14 +99,16 @@ def evaluate(self_check: bool) -> int:
         if self_check:
             pred_raw = gold_raw           # harness self-test: must score 1.00
         else:
-            pred_raw = call_model(doc, OUR_PARTY, use_cache=False)
+            # --cached scores the extraction already in the cache (real model
+            # output); without it, re-extracts live.
+            pred_raw = call_model(doc, OUR_PARTY, use_cache="--cached" in sys.argv)
         latencies.append(time.time() - started)
 
         pred, gstats = ground_clauses(pred_raw, doc, "pred")
         pred, report = verify_claims(pred, {doc.id: doc})
         grounded_total += len(pred)
         dropped_total += gstats.dropped + report.dropped
-        grounding.append(gstats)
+        provenance.append(gstats)
 
         types = {c.clause_type for c in pred} | {c.clause_type for c in gold}
         for ctype in types:
@@ -130,18 +132,18 @@ def evaluate(self_check: bool) -> int:
 
     p, r, f1 = prf(*totals)
     total_claims = grounded_total + dropped_total
-    grounding = grounded_total / total_claims if total_claims else 1.0
+    grounding_rate = grounded_total / total_claims if total_claims else 1.0
 
     print("-" * 70)
     print(f"{'MICRO-AVERAGE':<34}{p:>7.2f}{r:>7.2f}{f1:>7.2f}"
           f"{totals[0]:>5}{totals[1]:>5}{totals[2]:>5}")
     print(f"\n  documents scored      : {len(EVAL_SET)}")
     print(f"  clause types covered  : {len(per_type)}")
-    print(f"  grounding rate        : {grounding:.1%}")
+    print(f"  grounding rate        : {grounding_rate:.1%}")
     print(f"  ungrounded, discarded : {dropped_total}")
-    if grounding:
-        merged = grounding[0]
-        for g in grounding[1:]:
+    if provenance:
+        merged = provenance[0]
+        for g in provenance[1:]:
             merged = merged.merge(g)
         print(f"  span provenance       : {merged.summary()}")
     print(f"  hallucination rate    : 0.000  (by construction -- see api/verify.py)")
@@ -155,6 +157,9 @@ def evaluate(self_check: bool) -> int:
 
 if __name__ == "__main__":
     self_check = "--self" in sys.argv
-    print("HARNESS SELF-CHECK (gold vs gold)\n" if self_check
-          else f"LIVE EXTRACTION EVAL - model: {MODEL}\n")
+    if self_check:
+        print("HARNESS SELF-CHECK (gold vs gold)\n")
+    else:
+        mode = "cached" if "--cached" in sys.argv else "live"
+        print(f"EXTRACTION EVAL - model: {MODEL} ({mode})\n")
     raise SystemExit(evaluate(self_check))

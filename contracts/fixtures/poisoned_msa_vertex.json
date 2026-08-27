@@ -3,7 +3,7 @@
   "our_role": "buyer",
   "effective_date_text": "10 July 2026",
   "annual_value": 420000.0,
-  "currency": "USD",
+  "currency": null,
   "clauses": [
     {
       "clause_type": "auto_renewal",
@@ -15,9 +15,9 @@
       "days": 180,
       "months": 36,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -30,9 +30,9 @@
       "days": 180,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -46,8 +46,8 @@
       "months": null,
       "uptime_percent": null,
       "unilateral": true,
-      "survives_termination": false,
-      "note": "",
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -60,9 +60,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -75,9 +75,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -90,9 +90,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -106,8 +106,8 @@
       "months": null,
       "uptime_percent": null,
       "unilateral": true,
-      "survives_termination": false,
-      "note": "",
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -120,9 +120,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -135,8 +135,8 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
+      "unilateral": null,
+      "survives_termination": null,
       "note": "Texas",
       "confidence": 0.95
     },
@@ -151,8 +151,8 @@
       "months": null,
       "uptime_percent": null,
       "unilateral": true,
-      "survives_termination": false,
-      "note": "",
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     }
   ],
@@ -160,7 +160,7 @@
     {
       "kind": "renewal",
       "anchor": "term_end",
-      "offset_days": 0,
+      "offset_days": null,
       "recurrence_months": 36,
       "condition": null,
       "consequence": "Agreement auto-renews for a further 36 months.",

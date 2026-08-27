@@ -26,8 +26,11 @@ def main():
     by_id = {b.contract.id: b for b in bundles}
 
     rule("BEAT 1 - MONEY: a deadline derived from a contract containing no dates")
-    deadlines = upcoming_deadlines(bundles, TODAY, within_days=200)
-    top = next(d for d in deadlines if d["kind"] == "notice")
+    deadlines = upcoming_deadlines(bundles, TODAY, within_days=400)
+    # The renewal notice -- anchored to the end of the term -- is the one that
+    # costs money to miss. Other notices are noise next to it.
+    top = next(d for d in deadlines
+               if d["kind"] == "notice" and d["anchor"] == "term_end")
     print(f"{top['contract']} ({top['counterparty']})")
     print(f"  {top['kind'].upper()} deadline: {top['due_date']}  "
           f"[{top['days_remaining']} days remaining]")

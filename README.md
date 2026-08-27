@@ -11,18 +11,40 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
 No API key is needed for the demo — extractions are cached by document hash.
-To analyze new documents:
+The cache ships with **real `gpt-oss-120b` output** for all six documents, so
+the demo is live extraction, not fixtures. To re-extract or analyze new
+documents:
 
 ```bash
 export GROQ_API_KEY=gsk_...
-.venv/bin/python eval/smoke_groq.py      # verify the provider works
-.venv/bin/python eval/run_eval.py        # score it against the gold fixtures
+.venv/bin/python eval/smoke_groq.py        # one call, verifies the provider
+.venv/bin/python eval/extract_all.py --force  # re-extract the corpus (~8 min)
+.venv/bin/python eval/run_eval.py --cached    # score it against gold
 ```
 
-**Model:** `openai/gpt-oss-120b` on Groq — 131k context, 65k max output, strict
-`json_schema` support, ~500 tok/s. Override with `GROQ_MODEL`. The provider
-lives entirely in `api/llm.py`; swapping it touches one file, because
-`extract.py` is the only module that talks to a model (invariant 3).
+**Free-tier limits shape the design.** Groq free tier allows 8,000 TPM, and the
+`max_tokens` reservation counts against it — so a big reservation alone will 413
+a small request. `api/chunking.py` splits contracts at clause boundaries and
+`llm.TokenBudget` throttles to the window. A cold run of the six-document corpus
+is 9 requests over ~8 minutes; everything after that reads the cache.
+
+**Model:** `openai/gpt-oss-120b` on Groq — 131k context, strict `json_schema`
+support, ~500 tok/s. Override with `GROQ_MODEL`. The provider lives entirely in
+`api/llm.py`; swapping it touches one file, because `extract.py` is the only
+module that talks to a model (invariant 3).
+
+**Measured accuracy** (real extraction vs. hand-authored gold, `eval/run_eval.py --cached`):
+
+| | value |
+|---|---|
+| micro-average precision / recall / F1 | **0.84 / 0.91 / 0.88** |
+| clause types covered | 28 |
+| grounding rate | **100%** (86 spans, 0 discarded) |
+| hallucination rate | 0, by construction |
+
+Weakest types are `payment_terms` and `auto_renewal` (F1 0.67) — both
+precision failures where the model splits one clause into two overlapping
+quotes, not invented content.
 
 Note the extraction cache is keyed by `(document SHA-256, party, model)`, so
 after changing `GROQ_MODEL` re-run `eval/make_fixtures.py --seed-cache`.
@@ -69,12 +91,34 @@ Every design decision descends from these.
 | **Prompt-injection firewall** | Documents are adversarially authored. Hidden instructions are reported as a *tampering indicator on the counterparty* — the attack becomes a finding about the vendor. |
 | **Power asymmetry index** | Comparative, not absolute, so it's honest — and it yields the negotiation ask list for free. |
 
-## Grounding an open-weight model
+## Making an open-weight model behave
 
-Open models paraphrase inside text they were told to copy verbatim — dropping a
-word, normalizing "forty-five (45) days" to "45 days". Discarding those costs
-recall for no safety benefit, so `locate()` escalates through three stages and
-records which one hit:
+Four things were needed to get `gpt-oss-120b` to a usable extraction, each
+found by a real failure rather than anticipated:
+
+1. **Every wire field must be nullable.** Groq strict mode marks all fields
+   required, and a model with nothing to say emits `null`. A single
+   `currency: str = "USD"` cost the *entire chunk* with
+   `'/currency' … expected string, but got null`.
+2. **No enums on the wire.** The model writes `"party_favored": "Customer"`
+   where the schema said `"us"`, and strict mode rejects the whole response
+   over one nested value. Enums are plain strings on the wire and
+   `normalize_party()` maps them back — resolving role words against which side
+   of the paper we are on, so "Customer" means *us* when we are the buyer and
+   *the counterparty* when we are the seller.
+3. **The prompt must enumerate valid values and demand the numeric fields.**
+   Without an explicit field table the model returned quotes with every field
+   null, which silently zeroes the entire reasoning layer. Without an enumerated
+   anchor list it invented `quarter_end`, `anniversary`, and `audit` — two of
+   which turned out to be legitimate and are now first-class anchors.
+4. **Unknown anchors become `event`, not a drop.** An obligation we cannot put
+   on a calendar is still a real obligation; `temporal.py` reports it as
+   conditional. Dropping it would hide exactly what this product exists to find.
+
+### Grounding
+
+Open models also paraphrase inside text they were told to copy verbatim.
+`locate()` escalates through three stages and records which one hit:
 
 | Stage | What it handles |
 |---|---|
@@ -105,7 +149,8 @@ whole reasoning layer reproducible.
 |---|---|
 | `api/ingest.py` | PDF/text → canonical text + offsets. Normalizes **once**, before any offset exists. |
 | `api/firewall.py` | Invisible/tiny/off-page text, metadata payloads, injection language; nonce fencing. |
-| `api/llm.py` | Groq client; Pydantic → strict `json_schema` rewrite. The only provider-aware file. |
+| `api/llm.py` | Groq client, strict-schema rewrite, TPM throttle, retry. The only provider-aware file. |
+| `api/chunking.py` | Splits contracts at clause boundaries; chunks keep absolute offsets. |
 | `api/extract.py` | The only model caller. Structured output, temperature 0, cached by SHA-256. |
 | `api/verify.py` | The grounding gate. Drops anything unquotable. |
 | `api/family.py` | Document graph, amendment supersession, lineage. |
@@ -143,18 +188,18 @@ three bad rows is more credible than one with none.
 
 Honest list, since the deliverable is decision support:
 
-- **Extraction has never run live here** — no `GROQ_API_KEY` was available.
-  `api/llm.py` is written against Groq's documented strict `json_schema` API and
-  its schema rewriting is unit-tested, but no real completion has been made. The
-  demo runs on hand-authored fixtures seeded into the cache. Run
-  `eval/smoke_groq.py` first; it is built for exactly this check.
-- **Grounding rate on a real open-weight model is unmeasured.** The fuzzy
-  recovery stage exists because `gpt-oss-120b` is expected to paraphrase more
-  than a frontier model would, but the actual exact/realigned/discarded split is
-  unknown until the smoke test runs. If it comes back below ~80%, try
-  `GROQ_MODEL=moonshotai/kimi-k2-instruct` or tighten the prompt.
-- **No chunking.** Documents over ~380k characters are rejected with a clear
-  error rather than silently truncated.
+- **Precision is 0.84** — the model sometimes emits one clause as two
+  overlapping quotes. `_dedupe()` catches same-type overlaps within a document
+  but not near-duplicates the model files under different clause types.
+- **Recall is 0.91** — five gold clauses were missed across four documents.
+- **The fuzzy realignment stage has never fired on real output.** All 86 live
+  spans matched exactly. It is tested with synthetically mangled quotes, so it
+  works, but it is insurance rather than a load-bearing path today.
+- **Only 4 of 6 documents are scored** by the eval; the Order Form and
+  Amendment have gold fixtures but are not in `EVAL_SET`.
+- **Free tier makes cold extraction slow** (~8 min for six documents). A paid
+  tier with a higher TPM removes the throttling entirely — set `GROQ_TPM_LIMIT`.
+- Supersession matches on clause *type*, not section number.
 - **OCR is best-effort** — requires `pytesseract` + `pdf2image`, absent here.
   Falls back to the text layer and reports `used_ocr=False` rather than failing.
 - Supersession matches on clause *type*, not section number, so an amendment

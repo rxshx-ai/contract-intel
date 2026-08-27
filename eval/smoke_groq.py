@@ -13,10 +13,9 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from api.extract import ground_clauses, ground_rules
-from api.extract import SYSTEM, _user_message, RawExtraction
+from api.extract import call_model, ground_clauses, ground_rules
 from api.ingest import ingest_text
-from api.llm import MODEL, ExtractionUnavailable, complete_json
+from api.llm import MODEL, ExtractionUnavailable
 from api.verify import verify_claims
 
 TINY = """MASTER SERVICES AGREEMENT
@@ -44,10 +43,14 @@ def main() -> int:
     print(f"model    : {MODEL}")
     print(f"document : {doc.filename} ({len(doc.text):,} chars)\n")
 
+    from api.chunking import chunk_document
+
+    chunks = chunk_document(doc)
+    print(f"chunks   : {len(chunks)}\n")
+
     started = time.time()
     try:
-        raw = complete_json(SYSTEM, _user_message(doc, "Contoso Systems Ltd."),
-                            RawExtraction, schema_name="contract_extraction")
+        raw = call_model(doc, "Contoso Systems Ltd.", use_cache=False, verbose=True)
     except ExtractionUnavailable as exc:
         print(f"FAILED: {exc}")
         return 1
@@ -59,7 +62,7 @@ def main() -> int:
     verified, report = verify_claims(claims, {doc.id: doc})
 
     print(f"latency  : {elapsed:.1f}s")
-    print(f"returned : {len(raw.clauses)} clauses, {len(raw.temporal_rules)} rules")
+    print(f"returned : {len(raw.clause_list)} clauses, {len(raw.rule_list)} rules")
     print(f"grounding: {stats.summary()}")
     print(f"verified : {report.kept} kept, {report.dropped} dropped by the verifier")
     if stats.dropped_reasons:

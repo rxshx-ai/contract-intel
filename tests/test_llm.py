@@ -43,16 +43,40 @@ def test_defaults_are_stripped():
     assert "default" not in json.dumps(strict_schema(RawClause))
 
 
-def test_optional_fields_become_nullable_unions():
+def test_every_wire_field_is_nullable():
+    """Strict mode marks all fields required; a model with nothing to say emits
+    null. A non-nullable field with a default therefore costs the ENTIRE chunk.
+    """
     props = strict_schema(RawClause)["properties"]
-    assert {"type": "null"} in props["amount"]["anyOf"]
-    assert props["clause_type"] == {"type": "string", "title": "Clause Type"}
+    for name, prop in props.items():
+        options = prop.get("anyOf", [prop])
+        assert {"type": "null"} in options, f"{name} is not nullable"
 
 
-def test_enums_survive_hardening():
+def test_wire_schema_has_no_nested_enums():
+    """Deliberate: Groq strict mode rejects the WHOLE response when one nested
+    enum is violated, and models write "Customer" where we asked for "us".
+    Enums are normalized in Python instead (see extract.normalize_party)."""
     schema = strict_schema(RawExtraction)
-    role = schema["properties"]["our_role"]
-    assert set(role["enum"]) == {"buyer", "seller", "mutual"}
+
+    def walk(node):
+        if isinstance(node, dict):
+            assert "enum" not in node, f"enum survived at {node}"
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(schema)
+
+
+def test_class_docstrings_are_not_shipped_to_the_model():
+    """Docstrings are implementation notes, not prompt material."""
+    schema = strict_schema(RawExtraction)
+    assert "ON THE WIRE" not in json.dumps(schema)
+    # per-field guidance is kept
+    assert "Verbatim" in json.dumps(schema)
 
 
 def test_missing_key_fails_with_an_actionable_message(monkeypatch):

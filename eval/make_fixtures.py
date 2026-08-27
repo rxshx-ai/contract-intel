@@ -366,19 +366,19 @@ def main() -> int:
     failures = 0
     for filename, extraction in FIXTURES.items():
         doc = ingest_text((CONTRACTS / filename).read_text(), filename)
-        for clause in extraction.clauses:
+        for clause in extraction.clause_list:
             if clause.quote not in doc.text:
                 print(f"  UNGROUNDED [{filename}] {clause.clause_type}: {clause.quote[:70]!r}")
                 failures += 1
-        for r in extraction.temporal_rules:
+        for r in extraction.rule_list:
             if r.quote not in doc.text:
                 print(f"  UNGROUNDED [{filename}] rule {r.kind}: {r.quote[:70]!r}")
                 failures += 1
         (OUT / filename.replace(".txt", ".json")).write_text(
             extraction.model_dump_json(indent=2)
         )
-        print(f"  {filename}: {len(extraction.clauses)} clauses, "
-              f"{len(extraction.temporal_rules)} rules")
+        print(f"  {filename}: {len(extraction.clause_list)} clauses, "
+              f"{len(extraction.rule_list)} rules")
     if failures:
         print(f"\nFAILED: {failures} ungrounded quote(s). Fixtures must be exact.")
         return 1

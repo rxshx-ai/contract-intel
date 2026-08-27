@@ -140,6 +140,39 @@ def effective(claims: list[ClauseClaim]) -> list[ClauseClaim]:
     return [c for c in claims if c.effective]
 
 
+_ANNUAL = re.compile(
+    r"\b(annual|per\s+year|yearly|per\s+annum|subscription\s+fee)\b", re.IGNORECASE)
+
+# Amounts that are emphatically NOT the contract value.
+_NOT_VALUE = {
+    ClauseType.LIABILITY_CAP, ClauseType.UNCAPPED_CARVEOUT, ClauseType.INSURANCE,
+    ClauseType.EARLY_TERMINATION_FEE, ClauseType.INDEMNIFICATION,
+}
+
+
+def infer_annual_value(claims: list[ClauseClaim]) -> float | None:
+    """Recover the contract's annual value from clause amounts.
+
+    Models routinely file "an annual subscription fee of USD 640,000" under
+    payment_terms rather than setting the top-level annual_value. Losing it
+    silently zeroes every downstream money figure -- exposure, exit cost, the
+    cap-versus-value risk rule -- so it is recovered here in deterministic code
+    rather than being asked for twice.
+    """
+    best: float | None = None
+    for claim in effective(claims):
+        if claim.clause_type in _NOT_VALUE:
+            continue
+        amount = claim.fields.get("amount")
+        if amount is None:
+            continue
+        if claim.clause_type == ClauseType.MINIMUM_COMMITMENT:
+            return float(amount)
+        if _ANNUAL.search(claim.span.quote):
+            best = float(amount) if best is None else max(best, float(amount))
+    return best
+
+
 def build_contract(
     contract_id: str,
     title: str,
@@ -171,10 +204,7 @@ def build_contract(
                 break
 
     if annual_value is None:
-        for claim in effective(claims):
-            if claim.clause_type == ClauseType.MINIMUM_COMMITMENT:
-                annual_value = claim.fields.get("amount")
-                break
+        annual_value = infer_annual_value(claims)
 
     base_type = next((d.contract_type for d in docs
                       if d.contract_type not in (ContractType.AMENDMENT,

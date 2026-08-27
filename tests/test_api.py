@@ -43,11 +43,21 @@ def test_every_returned_clause_quote_is_grounded(client):
 
 
 def test_notice_deadline_is_derived_with_its_chain(client):
+    """The headline: a contract with no dates yields a real, auditable deadline."""
     body = client.get("/contracts/k_northwind/obligations").json()
-    notice = next(o for o in body["obligations"] if o["kind"] == "notice")
-    assert notice["due_date"] == "2026-12-31"
+    renewal_notice = [o for o in body["obligations"]
+                      if o["kind"] == "notice" and o["due_date"] == "2026-12-31"]
+    assert renewal_notice, "the 60-days-before-term-end deadline must be derived"
+    notice = renewal_notice[0]
     assert notice["days_remaining"] == 126
-    assert any("Effective Date = 2026-03-01" in s for s in notice["derivation"])
+    chain = " | ".join(notice["derivation"])
+    assert "Effective Date = 2026-03-01" in chain
+    assert "60 days before" in chain
+
+
+def test_event_anchored_obligations_are_reported_not_invented(client):
+    body = client.get("/contracts/k_northwind/obligations").json()
+    assert any("event-driven" in u for u in body["unresolved"])
 
 
 def test_risk_endpoint_publishes_its_rubric(client):

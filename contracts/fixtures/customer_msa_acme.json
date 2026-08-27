@@ -3,7 +3,7 @@
   "our_role": "seller",
   "effective_date_text": "1 May 2026",
   "annual_value": 640000.0,
-  "currency": "USD",
+  "currency": null,
   "clauses": [
     {
       "clause_type": "term",
@@ -15,9 +15,9 @@
       "days": null,
       "months": 24,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -30,9 +30,9 @@
       "days": 30,
       "months": 12,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -45,9 +45,9 @@
       "days": 30,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -60,9 +60,9 @@
       "days": null,
       "months": null,
       "uptime_percent": 99.99,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -75,9 +75,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -90,9 +90,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -105,9 +105,9 @@
       "days": 1,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -120,9 +120,9 @@
       "days": 30,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -135,9 +135,9 @@
       "days": 30,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -150,9 +150,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -165,9 +165,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -180,9 +180,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -195,9 +195,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -210,9 +210,9 @@
       "days": 60,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -226,8 +226,8 @@
       "months": null,
       "uptime_percent": null,
       "unilateral": true,
-      "survives_termination": false,
-      "note": "",
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -240,8 +240,8 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
+      "unilateral": null,
+      "survives_termination": null,
       "note": "England and Wales",
       "confidence": 0.95
     },
@@ -255,9 +255,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     }
   ],
@@ -265,7 +265,7 @@
     {
       "kind": "renewal",
       "anchor": "term_end",
-      "offset_days": 0,
+      "offset_days": null,
       "recurrence_months": 12,
       "condition": null,
       "consequence": "Agreement auto-renews for a further 12 months.",

@@ -3,7 +3,7 @@
   "our_role": "buyer",
   "effective_date_text": "1 June 2026",
   "annual_value": null,
-  "currency": "USD",
+  "currency": null,
   "clauses": [
     {
       "clause_type": "limitation_of_liability",
@@ -15,8 +15,8 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
+      "unilateral": null,
+      "survives_termination": null,
       "note": "supersedes MSA Section 11.1",
       "confidence": 0.95
     },
@@ -30,8 +30,8 @@
       "days": 30,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
+      "unilateral": null,
+      "survives_termination": null,
       "note": "supersedes MSA Section 3.2",
       "confidence": 0.95
     }

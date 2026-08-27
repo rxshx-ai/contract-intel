@@ -33,9 +33,55 @@ STRICT_SCHEMA_MODELS = {
 
 MAX_INPUT_CHARS = 380_000   # ~120k tokens, under the 131k window
 
+# Free tier is 8,000 TPM across every strict-schema model. That ceiling covers
+# prompt AND the max_tokens reservation, so a large reservation alone can 413 a
+# tiny request. Override once on a paid tier.
+TPM_LIMIT = int(os.environ.get("GROQ_TPM_LIMIT", "8000"))
+TPM_HEADROOM = 0.92         # leave slack for tokenizer estimate error
+MAX_OUTPUT_TOKENS = int(os.environ.get("GROQ_MAX_OUTPUT", "4500"))
+
 
 class ExtractionUnavailable(RuntimeError):
     """No credentials, no cache, or the model could not produce valid output."""
+
+
+class TokenBudget:
+    """Client-side TPM throttle over a rolling 60-second window.
+
+    Groq counts `max_tokens` against the per-minute budget at request time, not
+    at completion, so the reservation must be included here too. Without this a
+    multi-chunk contract 413s partway through and leaves a half-extraction.
+    """
+
+    def __init__(self, limit: int = TPM_LIMIT):
+        self.limit = int(limit * TPM_HEADROOM)
+        self._events: list[tuple[float, int]] = []
+
+    def _spent(self, now: float) -> int:
+        self._events = [(t, n) for t, n in self._events if now - t < 60.0]
+        return sum(n for _, n in self._events)
+
+    def reserve(self, tokens: int, verbose: bool = False) -> float:
+        """Block until `tokens` fit in the window. Returns seconds waited."""
+        import time
+
+        waited = 0.0
+        while True:
+            now = time.monotonic()
+            spent = self._spent(now)
+            if spent + tokens <= self.limit or not self._events:
+                self._events.append((now, tokens))
+                return waited
+            oldest = min(t for t, _ in self._events)
+            sleep_for = max(0.5, 60.0 - (now - oldest) + 0.5)
+            if verbose:
+                print(f"    [throttle] {spent:,}/{self.limit:,} tokens used this "
+                      f"minute; waiting {sleep_for:.0f}s", flush=True)
+            time.sleep(sleep_for)
+            waited += sleep_for
+
+
+BUDGET = TokenBudget()
 
 
 def client():
@@ -76,6 +122,10 @@ def _harden(node: Any) -> Any:
         # Strict mode requires EVERY property in `required`. Optionality is
         # expressed by the union-with-null that Pydantic already emits.
         out["required"] = list(properties.keys())
+        # Pydantic turns the class docstring into `description`. That is internal
+        # commentary, not guidance for the model -- ship neither the tokens nor
+        # the confusion. Per-field descriptions are kept.
+        out.pop("description", None)
     return out
 
 
@@ -95,8 +145,9 @@ def complete_json(
     *,
     model: str | None = None,
     temperature: float = 0.0,
-    max_tokens: int = 32_000,
+    max_tokens: int | None = None,
     schema_name: str = "extraction",
+    verbose: bool = False,
 ) -> T:
     """One structured completion, validated into `output_model`.
 
@@ -110,6 +161,20 @@ def complete_json(
             f"Document is {len(user):,} characters, above the {MAX_INPUT_CHARS:,} "
             f"limit for {model}. Chunked extraction is not implemented; the "
             f"document is NOT silently truncated."
+        )
+
+    from api.chunking import estimate_tokens
+
+    prompt_tokens = estimate_tokens(system) + estimate_tokens(user) + 64
+    if max_tokens is None:
+        # Fit the whole request inside one minute's budget.
+        available = int(TPM_LIMIT * TPM_HEADROOM) - prompt_tokens
+        max_tokens = max(512, min(MAX_OUTPUT_TOKENS, available))
+    if prompt_tokens + max_tokens > TPM_LIMIT:
+        raise ExtractionUnavailable(
+            f"Request needs ~{prompt_tokens + max_tokens:,} tokens but the "
+            f"per-minute limit is {TPM_LIMIT:,}. Reduce chunk size "
+            f"(api/chunking.DEFAULT_MAX_CHARS) or raise GROQ_TPM_LIMIT on a paid tier."
         )
 
     schema = strict_schema(output_model)
@@ -131,12 +196,10 @@ def complete_json(
             {"role": "user", "content": user},
         ]
 
-    completion = client().chat.completions.create(
-        model=model,
-        messages=messages,
-        response_format=response_format,
-        temperature=temperature,
-        max_tokens=max_tokens,
+    BUDGET.reserve(prompt_tokens + max_tokens, verbose=verbose)
+    completion = _create_with_retry(
+        model=model, messages=messages, response_format=response_format,
+        temperature=temperature, max_tokens=max_tokens, verbose=verbose,
     )
     content = completion.choices[0].message.content or ""
     finish = completion.choices[0].finish_reason
@@ -154,6 +217,58 @@ def complete_json(
         ) from exc
     except json.JSONDecodeError as exc:
         raise ExtractionUnavailable(f"{model} returned malformed JSON: {exc}") from exc
+
+
+def _create_with_retry(*, model, messages, response_format, temperature,
+                       max_tokens, verbose=False, attempts: int = 4):
+    """Retry on rate limiting, honouring the server's own retry-after."""
+    import time
+
+    import groq
+
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return client().chat.completions.create(
+                model=model, messages=messages, response_format=response_format,
+                temperature=temperature, max_tokens=max_tokens,
+            )
+        except groq.RateLimitError as exc:
+            last = exc
+            delay = _retry_after(exc) or min(60.0, 5.0 * (2 ** attempt))
+            if verbose:
+                print(f"    [rate limit] retrying in {delay:.0f}s "
+                      f"(attempt {attempt + 1}/{attempts})", flush=True)
+            time.sleep(delay)
+        except groq.BadRequestError as exc:
+            if "json_validate_failed" in str(exc):
+                raise ExtractionUnavailable(
+                    "The model could not produce JSON matching the schema. This "
+                    "is almost always output truncation: the extraction did not "
+                    "fit in max_tokens. Reduce api.chunking.DEFAULT_MAX_CHARS or "
+                    "raise GROQ_MAX_OUTPUT."
+                ) from exc
+            raise
+        except groq.APIStatusError as exc:
+            if exc.status_code and exc.status_code >= 500:
+                last = exc
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            raise
+    raise ExtractionUnavailable(f"rate limited after {attempts} attempts: {last}")
+
+
+def _retry_after(exc) -> float | None:
+    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+    for key in ("retry-after", "x-ratelimit-reset-tokens"):
+        value = headers.get(key)
+        if not value:
+            continue
+        try:
+            return float(str(value).rstrip("s")) + 1.0
+        except ValueError:
+            continue
+    return None
 
 
 def usage_of(completion) -> dict[str, Any]:

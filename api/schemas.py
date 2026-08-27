@@ -180,8 +180,11 @@ class TemporalRule(BaseModel):
     contract_id: str
     kind: Literal["renewal", "notice", "expiry", "payment", "report", "cure"]
     anchor: Literal[
-        "effective_date", "term_end", "invoice_date",
-        "breach_date", "signature_date",
+        # resolvable against the contract calendar
+        "effective_date", "term_end", "signature_date",
+        "anniversary", "month_end", "quarter_end",
+        # event-driven: no date until the event happens
+        "invoice_date", "breach_date", "event",
     ]
     offset_days: int = 0          # negative = before the anchor
     recurrence: str | None = None  # ISO-8601 duration, e.g. "P12M"
@@ -197,6 +200,7 @@ class Obligation(BaseModel):
     rule_id: str
     contract_id: str
     kind: str
+    anchor: str = "effective_date"
     due_date: date
     owed_by: Literal["us", "counterparty", "either"]
     description: str

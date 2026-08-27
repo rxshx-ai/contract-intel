@@ -15,9 +15,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -30,9 +30,9 @@
       "days": null,
       "months": 12,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     },
     {
@@ -45,9 +45,9 @@
       "days": null,
       "months": null,
       "uptime_percent": null,
-      "unilateral": false,
-      "survives_termination": false,
-      "note": "",
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
       "confidence": 0.95
     }
   ],
