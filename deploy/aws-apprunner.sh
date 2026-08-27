@@ -73,8 +73,24 @@ if ! aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
 fi
 ROLE_ARN="$(aws iam get-role --role-name "$ROLE_NAME" --query Role.Arn --output text)"
 
-ENV_JSON='{}'
-[ -n "${GROQ_API_KEY:-}" ] && ENV_JSON="{\"GROQ_API_KEY\":\"$GROQ_API_KEY\"}"
+# Runtime configuration. Secrets are passed as environment variables and never
+# baked into an image layer.
+ENV_PAIRS=""
+add_env() { [ -n "${2:-}" ] && ENV_PAIRS="$ENV_PAIRS\"$1\":\"$2\","; }
+add_env GROQ_API_KEY "${GROQ_API_KEY:-}"
+add_env DATABASE_URL "${DATABASE_URL:-}"
+add_env PINECONE_API_KEY "${PINECONE_API_KEY:-}"
+add_env PINECONE_INDEX "${PINECONE_INDEX:-}"
+ENV_JSON="{${ENV_PAIRS%,}}"
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo
+  echo "  NOTE: DATABASE_URL is not set, so the service will use SQLite on the"
+  echo "  container filesystem. That disk is ephemeral -- uploaded contracts are"
+  echo "  lost when the instance recycles. For anything you will show people,"
+  echo "  point DATABASE_URL at RDS. See deploy/aws-rds.sh."
+  echo
+fi
 
 EXISTING="$(aws apprunner list-services --region "$REGION" \
   --query "ServiceSummaryList[?ServiceName=='$SERVICE'].ServiceArn" --output text)"

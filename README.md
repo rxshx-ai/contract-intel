@@ -331,6 +331,71 @@ demo live.
 Uploaded contracts live in memory; a server restart reloads only the demo
 portfolio. The extraction cache survives, so re-uploading is immediate.
 
+## Storage and vectors
+
+Both are optional. Unset, the service runs on SQLite with lexical retrieval —
+which is what the tests and the offline demo use.
+
+| Variable | Effect when set |
+|---|---|
+| `DATABASE_URL` | Postgres instead of SQLite |
+| `PINECONE_API_KEY` | Semantic retrieval fused with BM25 |
+
+### Postgres
+
+`api/store.py` speaks both engines behind one interface. The interesting change
+is not the engine — it is that **the analysis now survives a restart**.
+Previously `_state["bundles"]` lived only in memory, so an uploaded contract
+died with the process. Contracts are stored in their analysed form, so a fresh
+process rehydrates without re-extracting and **without spending a token**.
+
+Verified against real Postgres 15: upload in one process, restart, contract and
+its claims/findings/deadlines all present, quotes still grounded.
+
+```bash
+docker compose up -d
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5433/contract_intel
+```
+
+Every query filters on `tenant_id`, and the tenant is bound at construction
+rather than passed per call — an argument you must remember to pass is an
+isolation bug waiting to happen. There is a test that one tenant cannot read
+another's contracts.
+
+### Pinecone
+
+`api/vectors.py`. Vectors sit **alongside** BM25, not in place of it, because
+each fails where the other works:
+
+- **BM25** — exact terms and numbers. "99.9%", "forty-five (45) days". An
+  embedding will happily rank 99.99% next to 99.9%, which is precisely the
+  distinction a contract question turns on.
+- **Vectors** — paraphrase. "what if they go bust" finds insolvency and
+  termination wording that shares no words with the question. BM25 returns
+  nothing.
+
+They are fused with **Reciprocal Rank Fusion**, which uses position only. BM25
+scores are unbounded and Pinecone's are bounded; blending them numerically
+would need a calibration that drifts the moment either side changes.
+
+Embeddings use **Pinecone integrated inference** — text is upserted and Pinecone
+embeds it server-side. That keeps the credential count at one, which matters
+because Groq serves no embedding model and the alternative was adding OpenAI or
+Cohere purely to make vectors work.
+
+```bash
+export PINECONE_API_KEY=...
+curl -X POST localhost:8077/vectors/sync    # index the extracted layer
+curl localhost:8077/system                  # what this process is backed by
+```
+
+Without a key the module is inert — every method is a no-op, so callers never
+branch on availability, and retrieval falls back to BM25 alone.
+
+**Is a vector DB warranted here?** Honestly, at 200 items for 4 contracts, no —
+BM25 answers in microseconds. At ~15,000 items for 300 contracts it is still not
+a scale problem. Vectors earn their place for *paraphrase recall*, not speed.
+
 ## Deploying to AWS
 
 ```bash
@@ -369,9 +434,9 @@ Cheaper alternatives if you would rather manage the box: EC2 `t4g.small`
 Lightsail container service at a flat $10/month — both need you to handle TLS
 and process supervision yourself.
 
-**Uploads do not survive a restart** — they live in memory. The seeded demo
-corpus always reloads; anything uploaded during a session is lost. That is the
-same gap listed below, and it matters more once this is hosted.
+Set `DATABASE_URL` to an RDS instance (`deploy/aws-rds.sh` creates one) before
+deploying anything you will show people. Without it the service uses SQLite on
+the container's ephemeral disk and loses uploads on every recycle.
 
 ## Known gaps
 

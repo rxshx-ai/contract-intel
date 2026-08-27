@@ -54,6 +54,50 @@ class ContractBundle:
     grounding: "extract_mod.GroundingStats" = field(
         default_factory=lambda: extract_mod.GroundingStats())
 
+    # ---- persistence ---------------------------------------------------
+    # A bundle is the entire analysis of one contract. Storing it means a fresh
+    # process serves uploaded contracts without re-extracting -- no tokens, no
+    # latency, and uploads stop disappearing when the container recycles.
+
+    def to_payload(self) -> dict:
+        return {
+            "version": 1,
+            "contract": self.contract.model_dump(mode="json"),
+            "documents": [d.model_dump(mode="json") for d in self.docs],
+            "claims": [c.model_dump(mode="json") for c in self.claims],
+            "rules": [r.model_dump(mode="json") for r in self.rules],
+            "obligations": [o.model_dump(mode="json") for o in self.obligations],
+            "findings": [f.model_dump(mode="json") for f in self.findings],
+            "firewall": [r.model_dump(mode="json") for r in self.firewall_reports],
+            "unresolved": self.unresolved,
+            "grounding_rate": self.grounding_rate,
+            "dropped": self.dropped,
+            "grounding": {
+                "exact": self.grounding.exact,
+                "whitespace": self.grounding.whitespace,
+                "fuzzy": self.grounding.fuzzy,
+                "dropped": self.grounding.dropped,
+            },
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict) -> "ContractBundle":
+        stats = extract_mod.GroundingStats(**(payload.get("grounding") or {}))
+        return cls(
+            contract=Contract.model_validate(payload["contract"]),
+            docs=[Document.model_validate(d) for d in payload["documents"]],
+            claims=[ClauseClaim.model_validate(c) for c in payload["claims"]],
+            rules=[TemporalRule.model_validate(r) for r in payload["rules"]],
+            obligations=[Obligation.model_validate(o) for o in payload["obligations"]],
+            findings=[Finding.model_validate(f) for f in payload["findings"]],
+            firewall_reports=[FirewallReport.model_validate(r)
+                              for r in payload.get("firewall", [])],
+            unresolved=payload.get("unresolved", []),
+            grounding_rate=payload.get("grounding_rate", 1.0),
+            dropped=payload.get("dropped", 0),
+            grounding=stats,
+        )
+
     def result(self) -> AnalysisResult:
         report, _ = measure_asymmetry(self.claims, self.contract)
         return AnalysisResult(

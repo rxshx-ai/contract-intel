@@ -7,6 +7,7 @@ routes.
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from datetime import date
@@ -18,12 +19,15 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from api import db, demo
+from api import demo
+from api.store import Store, is_postgres
+from api.vectors import VectorIndex
 from api.llm import MODEL as llm_model_name, ExtractionUnavailable
 from api.findings.backtoback import exposure_summary
 from api.findings.termination import termination_cost
 from api.ingest import ingest_pdf, ingest_text
-from api.pipeline import analyze_contract, analyze_portfolio, upcoming_deadlines
+from api.pipeline import (ContractBundle, analyze_contract,
+                          analyze_portfolio, upcoming_deadlines)
 from api.risk import band
 from api.schemas import OurRole
 
@@ -48,7 +52,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TENANT = "demo"          # single-tenant demo; every query still filters on it
 ACTOR = "demo@contoso.example"
 
-_conn = db.connect()
+_store = Store(tenant=TENANT)
+_vectors = VectorIndex(namespace=os.environ.get("TENANT", "demo"))
 _state: dict = {"bundles": [], "gaps": [], "today": date.today(),
                 "upload_checks": [], "last_upload": {}, "ask_index": None,
                 "retriever": None}
@@ -56,7 +61,7 @@ _state: dict = {"bundles": [], "gaps": [], "today": date.today(),
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    load_demo(_state["today"])
+    boot(_state["today"])
     yield
 
 
@@ -81,14 +86,53 @@ def _refresh_portfolio() -> None:
     _state["retriever"] = None
 
 
+def boot(today: date) -> None:
+    """Restore analysed contracts from the database; seed the demo if empty.
+
+    Uploads used to live only in `_state`, so a restart lost them. They are now
+    rehydrated from storage without re-extracting -- no tokens spent, and the
+    service can be restarted (or replaced) without losing a user's work.
+    """
+    _state["today"] = today
+    restored = []
+    for contract_id in _store.contract_ids():
+        payload = _store.get_contract(contract_id)
+        if not payload or "documents" not in payload:
+            continue                       # pre-persistence row; ignore
+        try:
+            restored.append(ContractBundle.from_payload(payload))
+        except Exception:                  # a schema change, not a user error
+            continue
+
+    if restored:
+        _state["bundles"] = restored
+        _state["restored"] = True
+    else:
+        _state["bundles"] = demo.load(today)
+        _state["restored"] = False
+        for bundle in _state["bundles"]:
+            persist(bundle)
+    _refresh_portfolio()
+    _store.audit("system", "boot", None,
+                 f"{len(_state['bundles'])} contracts "
+                 f"({'restored' if restored else 'seeded'})")
+
+
+def persist(bundle) -> None:
+    """Store the analysis, and index it for semantic search."""
+    _store.save_contract(bundle.contract, json.dumps(bundle.to_payload()))
+    for doc in bundle.docs:
+        _store.save_document(doc, contract_id=bundle.contract.id)
+
+
 def load_demo(today: date) -> None:
+    """Reset to the seeded corpus. Used by tests."""
     _state["today"] = today
     _state["bundles"] = demo.load(today)
+    _state["restored"] = False
     _refresh_portfolio()
     for bundle in _state["bundles"]:
-        db.save_contract(_conn, TENANT, bundle.contract, bundle.result().model_dump_json())
-        db.audit(_conn, TENANT, "system", "analyze", bundle.contract.id,
-                 f"{len(bundle.claims)} grounded clauses")
+        persist(bundle)
 
 
 # --------------------------------------------------------------------------
@@ -113,8 +157,8 @@ async def upload_document(file: UploadFile = File(...)):
         doc = ingest_text(raw.decode("utf-8", errors="replace"), name)
         report = inspect(doc)
 
-    db.save_document(_conn, TENANT, doc)
-    db.audit(_conn, TENANT, ACTOR, "upload", doc.id, doc.filename)
+    _store.save_document(doc)
+    _store.audit(ACTOR, "upload", doc.id, doc.filename)
     return {
         "doc_id": doc.id,
         "filename": doc.filename,
@@ -148,7 +192,7 @@ async def create_contract(
         else:
             doc = ingest_text(raw.decode("utf-8", errors="replace"), name)
         docs.append(doc)
-        db.save_document(_conn, TENANT, doc)
+        _store.save_document(doc)
 
     try:
         bundle = analyze_contract(
@@ -173,8 +217,8 @@ async def create_contract(
     _state["bundles"] = [b for b in _state["bundles"]
                          if b.contract.id != bundle.contract.id] + [bundle]
     _refresh_portfolio()
-    db.save_contract(_conn, TENANT, bundle.contract, bundle.result().model_dump_json())
-    db.audit(_conn, TENANT, ACTOR, "analyze", bundle.contract.id,
+    persist(bundle)
+    _store.audit(ACTOR, "analyze", bundle.contract.id,
              f"{len(bundle.claims)} clauses, grounding {bundle.grounding_rate:.2%}")
     return bundle.result().model_dump()
 
@@ -208,7 +252,7 @@ def list_contracts():
 @app.get("/contracts/{contract_id}")
 def get_contract(contract_id: str):
     bundle = _bundle(contract_id)
-    db.audit(_conn, TENANT, ACTOR, "view", contract_id)
+    _store.audit(ACTOR, "view", contract_id)
     result = bundle.result().model_dump()
     result["unresolved"] = bundle.unresolved
     result["documents"] = [
@@ -284,7 +328,7 @@ def post_termination_cost(contract_id: str, exit_date: str = Form(...)):
         raise HTTPException(status_code=400, detail="exit_date must be YYYY-MM-DD")
     cost = termination_cost(bundle.contract, bundle.claims, bundle.obligations,
                             exit_date=parsed, today=_today())
-    db.audit(_conn, TENANT, ACTOR, "termination_cost", contract_id, exit_date)
+    _store.audit(ACTOR, "termination_cost", contract_id, exit_date)
     return cost.model_dump()
 
 
@@ -364,8 +408,32 @@ def _retriever():
     from api.rag import Retriever
 
     if _state.get("retriever") is None:
-        _state["retriever"] = Retriever(_state["bundles"], _state["gaps"], _today())
+        _state["retriever"] = Retriever(_state["bundles"], _state["gaps"],
+                                        _today(), vectors=_vectors)
     return _state["retriever"]
+
+
+@app.post("/vectors/sync")
+def vectors_sync():
+    """Push the current extracted layer to Pinecone."""
+    return _retriever().sync_vectors()
+
+
+@app.get("/vectors/stats")
+def vectors_stats():
+    return _vectors.stats()
+
+
+@app.get("/system")
+def system_info():
+    """What this process is actually backed by."""
+    return {
+        "database": "postgres" if is_postgres() else "sqlite",
+        "vectors": _vectors.stats(),
+        "contracts": len(_state["bundles"]),
+        "restored_from_storage": bool(_state.get("restored")),
+        "retrieval": _retriever().stats,
+    }
 
 
 @app.get("/rag/search")
@@ -397,7 +465,7 @@ def agent_ask(question: str = Form(...), max_steps: int = Form(5)):
     except Exception as exc:
         raise HTTPException(status_code=502,
                             detail=f"Agent failed against {llm_model()}: {exc}")
-    db.audit(_conn, TENANT, ACTOR, "agent", None, question[:200])
+    _store.audit(ACTOR, "agent", None, question[:200])
     return result.to_dict()
 
 
@@ -448,7 +516,7 @@ def post_ask(question: str = Form(...), contract_id: str | None = Form(None)):
         raise HTTPException(status_code=502,
                             detail=f"Ask failed against {llm_model()}: {exc}")
 
-    db.audit(_conn, TENANT, ACTOR, "ask", contract_id, question[:200])
+    _store.audit(ACTOR, "ask", contract_id, question[:200])
     return answer.to_dict()
 
 
@@ -457,7 +525,7 @@ def ui_model():
     """Everything the designed front end renders, in the shapes it expects."""
     from api.viewmodel import build_model
 
-    db.audit(_conn, TENANT, ACTOR, "view", "ui_model")
+    _store.audit(ACTOR, "view", "ui_model")
     return build_model(
         _state["bundles"], _state["gaps"], _today(),
         upload_checks=_state.get("upload_checks") or [],
@@ -467,7 +535,7 @@ def ui_model():
 
 @app.get("/audit")
 def audit_log(limit: int = Query(100)):
-    return db.read_audit(_conn, TENANT, limit)
+    return _store.read_audit(limit)
 
 
 @app.get("/")

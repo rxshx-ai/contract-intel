@@ -26,6 +26,7 @@ from typing import Any, Literal
 from api.bm25 import BM25, tokenize
 from api.chunking import section_boundaries
 from api.schemas import Document
+from api.vectors import VectorIndex, reciprocal_rank_fusion
 
 PASSAGE_CHARS = 700
 PASSAGE_OVERLAP = 120
@@ -159,10 +160,12 @@ class Hit:
 class Retriever:
     """One search surface over both indexes."""
 
-    def __init__(self, bundles, gaps, today: date):
+    def __init__(self, bundles, gaps, today: date,
+                 vectors: VectorIndex | None = None):
         from api.ask import Index, build_records
 
         self.today = today
+        self.vectors = vectors or VectorIndex()
         self.records = build_records(bundles, gaps, today)
         self.record_index = Index(self.records)
 
@@ -186,11 +189,46 @@ class Retriever:
         contract_id: str | None = None,
         include: tuple[str, ...] = ("record", "passage"),
     ) -> list[Hit]:
+        """Lexical and semantic retrieval, fused by rank.
+
+        BM25 alone misses paraphrase ("what if they go bust" shares no words
+        with an insolvency clause). Vectors alone rank 99.99% next to 99.9%,
+        which is exactly the distinction a contract question turns on. Running
+        both and fusing by POSITION avoids calibrating two incomparable score
+        scales against each other.
+        """
+        lexical = self._lexical(query, k=k * 2, contract_id=contract_id,
+                                include=include)
+        if not self.vectors.available:
+            return _diversify(lexical, k)
+
+        semantic = self.vectors.search(query, k=k * 2, contract_id=contract_id)
+        semantic_ids = [h.id for h in semantic if h.id in self.by_id]
+        if not semantic_ids:
+            return _diversify(lexical, k)
+
+        fused = reciprocal_rank_fusion([h.id for h in lexical], semantic_ids)
+        lexical_by_id = {h.id: h for h in lexical}
+        hits: list[Hit] = []
+        for item_id, score in sorted(fused.items(), key=lambda kv: -kv[1]):
+            existing = lexical_by_id.get(item_id)
+            payload = existing.payload if existing else self.by_id.get(item_id)
+            if payload is None:
+                continue
+            kind = existing.kind if existing else (
+                "passage" if item_id.startswith("p") else "record")
+            if kind not in include:
+                continue
+            hits.append(Hit(kind, item_id, score, payload))
+        return _diversify(hits, k)
+
+    def _lexical(self, query: str, k: int, contract_id: str | None,
+                 include: tuple[str, ...]) -> list[Hit]:
         hits: list[Hit] = []
 
         if "record" in include:
             for record, score in self.record_index.rank(
-                query, top_k=k * 2, contract_id=contract_id
+                query, top_k=k, contract_id=contract_id
             ):
                 hits.append(Hit("record", record.id, score, record))
 
@@ -207,7 +245,7 @@ class Retriever:
                     hits.append(Hit("passage", passage.id, score * 0.75, passage))
 
         hits.sort(key=lambda h: -h.score)
-        return _diversify(hits, k)
+        return hits
 
     def get(self, record_id: str) -> Any | None:
         return self.by_id.get(record_id)
@@ -222,8 +260,39 @@ class Retriever:
         return out
 
     @property
-    def stats(self) -> dict[str, int]:
-        return {"records": len(self.records), "passages": len(self.passages)}
+    def stats(self) -> dict[str, Any]:
+        return {"records": len(self.records), "passages": len(self.passages),
+                "vectors": self.vectors.stats()}
+
+    def vector_payload(self) -> list[dict[str, Any]]:
+        """Everything worth embedding, with the metadata a filter needs."""
+        items: list[dict[str, Any]] = []
+        for record in self.records:
+            items.append({
+                "id": record.id,
+                "text": f"{record.title}. {record.body} {record.quote or ''}".strip(),
+                "kind": record.kind,
+                "contract_id": record.contract_id,
+                "contract": record.contract,
+            })
+        for passage in self.passages:
+            items.append({
+                "id": passage.id,
+                "text": passage.text,
+                "kind": "passage",
+                "contract_id": passage.contract_id,
+                "contract": passage.contract,
+                "file": passage.file,
+            })
+        return items
+
+    def sync_vectors(self) -> dict[str, Any]:
+        """Push the current layer to Pinecone. Safe to call when disabled."""
+        if not self.vectors.available:
+            return {"synced": 0, "enabled": False,
+                    "reason": self.vectors.last_error or "no PINECONE_API_KEY"}
+        written = self.vectors.upsert(self.vector_payload())
+        return {"synced": written, "enabled": True}
 
 
 def _diversify(hits: list[Hit], k: int, per_contract: int = 4) -> list[Hit]:
