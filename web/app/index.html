@@ -1,0 +1,1235 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./vendor/react.production.min.js"></script>
+<script src="./vendor/react-dom.production.min.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/modernist-096827ca-0f2c-4cee-8050-0e4c46a31588/styles.css">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  ::-webkit-scrollbar { width: 12px; }
+  ::-webkit-scrollbar-thumb { background: color-mix(in srgb, #201e1d 22%, transparent); }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</helmet>
+
+<div style="height:100vh;display:grid;grid-template-rows:auto auto 1fr auto;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body);position:relative;overflow:hidden">
+
+  <div class="nav" style="padding:14px 32px;gap:24px;align-items:center">
+    <div class="nav-brand" style="display:flex;align-items:center;gap:12px;margin-right:0">
+      <span style="width:16px;height:16px;background:var(--color-accent);display:block"></span>
+      <span style="font-size:19px;letter-spacing:-0.01em">Contract Intel</span>
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:18px">
+      <span style="font-size:13px;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ asOfLabel }}</span>
+      <div class="seg" style="flex:none">
+        <label class="seg-opt" style="padding:8px 14px;font-size:12.5px"><input type="radio" name="role" checked="{{ roleFinance }}" onChange="{{ setFinance }}" />Finance view</label>
+        <label class="seg-opt" style="padding:8px 14px;font-size:12.5px"><input type="radio" name="role" checked="{{ roleLegal }}" onChange="{{ setLegal }}" />Legal view</label>
+      </div>
+      <button onClick="{{ goUpload }}" class="btn btn-primary" style="flex:none">Add a document</button>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:stretch;border-bottom:2px solid var(--color-divider);background:var(--color-surface);overflow-x:auto">
+    <sc-for list="{{ navGroups }}" as="g" hint-placeholder-count="5">
+      <div style="display:flex;align-items:center;gap:0;padding:0 4px;border-right:1px solid var(--color-divider)">
+        <span style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 42%,transparent);padding:0 12px 0 14px;white-space:nowrap;font-family:var(--font-heading);font-weight:800">{{ g.beat }}</span>
+        <sc-for list="{{ g.items }}" as="n" hint-placeholder-count="2">
+          <button onClick="{{ n.go }}" style="border:0;background:{{ n.bg }};cursor:pointer;font-family:var(--font-heading);font-weight:800;font-size:13px;padding:12px 16px;color:{{ n.fg }};white-space:nowrap" style-hover="background:color-mix(in srgb, var(--color-text) 7%, transparent)">{{ n.label }}</button>
+        </sc-for>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="overflow:auto;min-height:0">
+
+    <!-- ══════ DEADLINES ══════ -->
+    <sc-if value="{{ isDeadlines }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <div style="padding:36px 32px 30px;border-bottom:2px solid var(--color-divider)">
+          <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:14px">Money · beat one</div>
+          <h2 style="margin:0 0 14px;font-size:34px;max-width:920px;text-wrap:pretty">{{ deadlineHeadline }}</h2>
+          <p style="margin:0;font-size:16px;line-height:1.65;max-width:780px;color:color-mix(in srgb,var(--color-text) 75%,transparent)">{{ deadlineSubhead }}</p>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:2px solid var(--color-divider)">
+          <div style="padding:28px 32px">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:12px">Already slipped</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:52px;line-height:1;color:var(--color-accent);font-variant-numeric:tabular-nums">{{ statMissed }}</div>
+            <div style="font-size:14px;margin-top:10px;line-height:1.55;max-width:320px">{{ statMissedNote }}</div>
+          </div>
+          <div style="padding:28px 32px;border-left:2px solid var(--color-divider)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:12px">Coming in 90 days</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:52px;line-height:1;font-variant-numeric:tabular-nums">{{ stat90 }}</div>
+            <div style="font-size:14px;margin-top:10px;line-height:1.55;max-width:320px">{{ stat90Note }}</div>
+          </div>
+          <div style="padding:28px 32px;border-left:2px solid var(--color-divider)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:12px">Held back for a person</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:52px;line-height:1;font-variant-numeric:tabular-nums">{{ statHeld }}</div>
+            <div style="font-size:14px;margin-top:10px;line-height:1.55;max-width:320px">{{ statHeldNote }}</div>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:20px;padding:24px 32px 20px;flex-wrap:wrap">
+          <h4 style="margin:0;font-size:22px">Every date we know about</h4>
+          <span style="font-size:14.5px;color:color-mix(in srgb,var(--color-text) 62%,transparent);max-width:560px;line-height:1.5">Not one of these dates was written in a contract. Each was worked out from wording we can show you.</span>
+          <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+            <div class="seg">
+              <label class="seg-opt"><input type="radio" name="win" checked="{{ win30 }}" onChange="{{ setWin30 }}" />Next 30 days</label>
+              <label class="seg-opt"><input type="radio" name="win" checked="{{ win90 }}" onChange="{{ setWin90 }}" />90 days</label>
+              <label class="seg-opt"><input type="radio" name="win" checked="{{ winAll }}" onChange="{{ setWinAll }}" />Everything</label>
+            </div>
+            <button class="btn btn-secondary">Add to my calendar</button>
+          </div>
+        </div>
+
+        <sc-for list="{{ deadlines }}" as="o" hint-placeholder-count="5">
+          <div style="border-top:1px solid var(--color-divider)">
+            <div onClick="{{ o.toggle }}" style="display:grid;grid-template-columns:140px 1fr 250px;gap:28px;padding:24px 32px;cursor:pointer;align-items:start;background:{{ o.rowBg }}" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+              <div>
+                <div style="font-family:var(--font-heading);font-weight:800;font-size:32px;line-height:1;font-variant-numeric:tabular-nums;color:{{ o.daysColor }}">{{ o.daysBig }}</div>
+                <div style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;margin-top:7px;color:{{ o.daysColor }}">{{ o.daysWord }}</div>
+                <div style="font-size:13px;margin-top:9px;color:color-mix(in srgb,var(--color-text) 55%,transparent);font-variant-numeric:tabular-nums">{{ o.dueLabel }}</div>
+              </div>
+              <div>
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+                  <span style="font-family:var(--font-heading);font-weight:800;font-size:19px">{{ o.party }}</span>
+                  <sc-if value="{{ o.hasFlag }}" hint-placeholder-val="{{ false }}">
+                    <span class="tag" style="{{ o.flagStyle }}">{{ o.flag }}</span>
+                  </sc-if>
+                </div>
+                <div style="font-size:16px;line-height:1.65;max-width:660px;text-wrap:pretty">{{ o.plain }}</div>
+                <div style="font-size:13.5px;margin-top:11px;color:color-mix(in srgb,var(--color-text) 58%,transparent)">Owned by {{ o.owner }} · {{ o.metaLine }}</div>
+              </div>
+              <div style="text-align:right">
+                <div style="font-family:var(--font-heading);font-weight:800;font-size:22px;font-variant-numeric:tabular-nums">{{ o.rightBig }}</div>
+                <div style="font-size:12.5px;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:14px;line-height:1.5">{{ o.rightCaption }}</div>
+                <span class="btn btn-ghost" style="font-size:13px;padding:0">{{ o.expandLabel }}</span>
+              </div>
+            </div>
+            <sc-if value="{{ o.open }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:0 32px 30px 200px;background:var(--color-surface);border-top:1px solid var(--color-divider)">
+                <div style="display:flex;align-items:baseline;gap:16px;padding:22px 0 14px;flex-wrap:wrap">
+                  <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent-700);font-family:var(--font-heading);font-weight:800">How we got this date</div>
+                  <div style="font-size:14.5px;color:color-mix(in srgb,var(--color-text) 65%,transparent)">Read it top to bottom. Quoted lines came out of the document; the rest is arithmetic.</div>
+                  <button onClick="{{ o.openContract }}" class="btn btn-secondary" style="margin-left:auto">Open the contract</button>
+                </div>
+                <sc-for list="{{ o.derivation }}" as="s" hint-placeholder-count="4">
+                  <div style="display:grid;grid-template-columns:40px 112px 1fr;gap:18px;padding:14px 0;border-top:1px solid var(--color-divider);align-items:baseline">
+                    <div style="font-size:14px;font-variant-numeric:tabular-nums;color:color-mix(in srgb,var(--color-text) 40%,transparent)">{{ s.n }}</div>
+                    <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:{{ s.tagColor }};font-family:var(--font-heading);font-weight:800">{{ s.tag }}</div>
+                    <div>
+                      <div style="font-size:15px;line-height:1.6">{{ s.text }}</div>
+                      <sc-if value="{{ s.hasQuote }}" hint-placeholder-val="{{ true }}">
+                        <div style="border-left:2px solid var(--color-accent);padding:4px 0 4px 14px;margin-top:8px;font-size:14.5px;font-style:italic;line-height:1.65">“{{ s.quote }}” <span style="font-style:normal;font-size:11.5px;font-variant-numeric:tabular-nums;color:color-mix(in srgb,var(--color-text) 45%,transparent)">{{ s.offsets }}</span></div>
+                      </sc-if>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+
+        <sc-if value="{{ deadlinesEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="border-top:1px solid var(--color-divider);padding:56px 32px;max-width:620px">
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:22px;margin-bottom:10px">Nothing due in the next 30 days</div>
+            <div style="font-size:15.5px;line-height:1.65;color:color-mix(in srgb,var(--color-text) 70%,transparent)">The next thing on the calendar is {{ nextBeyond }}. Widen the window if you want to see further out.</div>
+            <button onClick="{{ setWinAll }}" class="btn btn-secondary" style="margin-top:18px">Show everything</button>
+          </div>
+        </sc-if>
+
+        <div style="border-top:2px solid var(--color-divider);padding:26px 32px;font-size:14.5px;color:color-mix(in srgb,var(--color-text) 60%,transparent);max-width:840px;line-height:1.65">This is decision support, not legal advice. We won't tell you whether to sign anything. We tell you what the document says, and when it matters.</div>
+      </div>
+    </sc-if>
+
+
+    <!-- ══════ ASK ══════ -->
+    <sc-if value="{{ isAsk }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding:36px 32px 28px;border-bottom:2px solid var(--color-divider)">
+          <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:14px">Ask</div>
+          <h2 style="margin:0 0 12px;font-size:32px">Ask about your contracts</h2>
+          <p style="margin:0;font-size:16px;line-height:1.65;max-width:800px;color:color-mix(in srgb,var(--color-text) 75%,transparent)">Answers come from what we already pulled out of your documents and checked &mdash; the clauses, the dates we worked out, and the wording we found missing. Not from re-reading the contract, and not from anything we know about contracts in general. If the answer isn&rsquo;t in there, we say so.</p>
+        </div>
+
+        <div style="padding:26px 32px;border-bottom:2px solid var(--color-divider);display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <input type="text" value="{{ askQuestion }}" onChange="{{ setAskQuestion }}" placeholder="When does Northwind renew, and what stops it?" style="flex:1;min-width:340px;font:inherit;font-size:16px;padding:14px 16px;border:2px solid var(--color-divider);background:var(--color-surface);color:var(--color-text)" />
+          <button onClick="{{ submitAsk }}" class="btn btn-primary" style="flex:none">{{ askButtonLabel }}</button>
+        </div>
+
+        <div style="display:flex;gap:10px;padding:18px 32px 4px;flex-wrap:wrap;align-items:center">
+          <span style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 50%,transparent);margin-right:4px">Try</span>
+          <sc-for list="{{ askSuggestions }}" as="q" hint-placeholder-count="4">
+            <button onClick="{{ q.go }}" class="btn btn-secondary" style="font-size:13px;padding:7px 12px">{{ q.label }}</button>
+          </sc-for>
+        </div>
+
+        <sc-if value="{{ askHasAnswer }}" hint-placeholder-val="{{ true }}">
+          <div style="padding:28px 32px 8px">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:12px">{{ askQuestionEcho }}</div>
+            <div style="font-size:20px;line-height:1.65;max-width:860px;text-wrap:pretty">{{ askAnswer }}</div>
+            <div style="font-size:13.5px;margin-top:14px;color:color-mix(in srgb,var(--color-text) 58%,transparent)">{{ askMeta }}</div>
+          </div>
+
+          <sc-if value="{{ askUnanswerable }}" hint-placeholder-val="{{ false }}">
+            <div style="margin:20px 32px 8px;border:2px solid var(--color-accent);background:var(--color-accent-100);padding:20px 24px;max-width:860px">
+              <div style="font-family:var(--font-heading);font-weight:800;font-size:17px;color:var(--color-accent-700);margin-bottom:6px">We would be guessing</div>
+              <div style="font-size:15.5px;line-height:1.6">{{ askMissing }}</div>
+            </div>
+          </sc-if>
+
+          <div style="padding:20px 32px 8px">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ askCitationsLabel }}</div>
+          </div>
+          <sc-for list="{{ askCitations }}" as="c" hint-placeholder-count="3">
+            <div onClick="{{ c.open }}" style="display:grid;grid-template-columns:190px 1fr;gap:24px;padding:20px 32px;border-top:1px solid var(--color-divider);cursor:pointer" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+              <div>
+                <div style="font-family:var(--font-heading);font-weight:800;font-size:15px">{{ c.contract }}</div>
+                <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-top:6px;color:{{ c.kindColor }}">{{ c.kind }}</div>
+              </div>
+              <div>
+                <div style="font-size:15.5px;line-height:1.6;margin-bottom:8px">{{ c.title }}</div>
+                <sc-if value="{{ c.hasQuote }}" hint-placeholder-val="{{ true }}">
+                  <div style="border-left:2px solid var(--color-accent);padding:4px 0 4px 14px;font-size:14.5px;font-style:italic;line-height:1.65">&ldquo;{{ c.quote }}&rdquo; <span style="font-style:normal;font-size:11.5px;font-variant-numeric:tabular-nums;color:color-mix(in srgb,var(--color-text) 45%,transparent)">{{ c.offsets }}</span></div>
+                </sc-if>
+                <sc-if value="{{ c.isAbsence }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:14px;color:color-mix(in srgb,var(--color-text) 60%,transparent)">Nothing to quote &mdash; this is wording that is not in the document.</div>
+                </sc-if>
+              </div>
+            </div>
+          </sc-for>
+        </sc-if>
+
+        <div style="border-top:2px solid var(--color-divider);margin-top:26px;padding:26px 32px;font-size:14.5px;color:color-mix(in srgb,var(--color-text) 60%,transparent);max-width:860px;line-height:1.65">Every answer is assembled from records that were checked against your documents character by character. The model chooses which records answer you; it never writes the quotes, so it cannot invent one.</div>
+      </div>
+    </sc-if>
+
+    <!-- ══════ UPLOAD ══════ -->
+    <sc-if value="{{ isUpload }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding:36px 32px 28px;border-bottom:2px solid var(--color-divider)">
+          <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:14px">Getting started</div>
+          <h2 style="margin:0 0 12px;font-size:32px">Add a document</h2>
+          <p style="margin:0;font-size:16px;line-height:1.65;max-width:760px;color:color-mix(in srgb,var(--color-text) 75%,transparent)">Drop in a PDF. We read it, check it for tampering, then pull out the clauses. Nothing reaches your calendar until you've seen what we found.</p>
+        </div>
+        <div style="display:grid;grid-template-columns:minmax(380px,1fr) minmax(440px,1.15fr)">
+          <div style="padding:32px;border-right:2px solid var(--color-divider)">
+            <div style="border:2px dashed var(--color-divider);padding:52px 32px;background:var(--color-surface)">
+              <div style="font-family:var(--font-heading);font-weight:800;font-size:22px;margin-bottom:10px">Drop a PDF here</div>
+              <div style="font-size:15px;line-height:1.65;color:color-mix(in srgb,var(--color-text) 70%,transparent);max-width:400px">Text-layer PDFs work best. Scans go through OCR and we'll tell you how confident we were, page by page.</div>
+              <input type="file" onChange="{{ onPickFile }}" style="margin-top:22px;font:inherit;display:block" />
+              <div style="margin-top:12px;font-size:14px;color:color-mix(in srgb,var(--color-text) 70%,transparent)">{{ uploadStatus }}</div>
+            </div>
+            <div style="margin-top:30px">
+              <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:14px">What happens next</div>
+              <sc-for list="{{ pipelineSteps }}" as="p" hint-placeholder-count="5">
+                <div style="display:grid;grid-template-columns:40px 1fr;gap:16px;padding:16px 0;border-top:1px solid var(--color-divider)">
+                  <div style="font-family:var(--font-heading);font-weight:800;font-size:14px;font-variant-numeric:tabular-nums;color:color-mix(in srgb,var(--color-text) 40%,transparent)">{{ p.n }}</div>
+                  <div>
+                    <div style="font-family:var(--font-heading);font-weight:800;font-size:15.5px;margin-bottom:3px">{{ p.title }}</div>
+                    <div style="font-size:14.5px;line-height:1.6;color:color-mix(in srgb,var(--color-text) 70%,transparent)">{{ p.body }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="padding:32px">
+            <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:18px;flex-wrap:wrap">
+              <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">Last document processed</div>
+              <div style="font-size:13px;font-variant-numeric:tabular-nums;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ lastUploadLabel }}</div>
+            </div>
+            <div style="border:2px solid var(--color-accent);padding:24px;background:var(--color-accent-100);margin-bottom:28px">
+              <div style="font-family:var(--font-heading);font-weight:800;font-size:20px;color:var(--color-accent-700);margin-bottom:8px">We stopped before reading this one properly</div>
+              <div style="font-size:15.5px;line-height:1.65">{{ uploadAlertBody }}</div>
+              <button onClick="{{ goSecurity }}" class="btn btn-primary" style="margin-top:18px">See what we found</button>
+            </div>
+            <sc-for list="{{ uploadChecks }}" as="u" hint-placeholder-count="6">
+              <div style="display:grid;grid-template-columns:14px 1fr 140px;gap:16px;padding:17px 0;border-top:1px solid var(--color-divider);align-items:start">
+                <div style="width:12px;height:12px;margin-top:6px;background:{{ u.dot }}"></div>
+                <div>
+                  <div style="font-family:var(--font-heading);font-weight:800;font-size:15.5px;margin-bottom:2px">{{ u.label }}</div>
+                  <div style="font-size:14.5px;line-height:1.6;color:color-mix(in srgb,var(--color-text) 70%,transparent)">{{ u.detail }}</div>
+                </div>
+                <div style="text-align:right;font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-family:var(--font-heading);font-weight:800;color:{{ u.dot }}">{{ u.status }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ══════ CONTRACTS ══════ -->
+    <sc-if value="{{ isContracts }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding:36px 32px 26px;border-bottom:2px solid var(--color-divider)">
+          <h2 style="margin:0 0 12px;font-size:32px">Your contracts</h2>
+          <p style="margin:0;font-size:16px;line-height:1.65;max-width:780px;color:color-mix(in srgb,var(--color-text) 75%,transparent)">Amendments are folded in, so what you see is what currently applies. Superseded wording is kept underneath rather than thrown away.</p>
+        </div>
+        <sc-for list="{{ contractRows }}" as="c" hint-placeholder-count="6">
+          <div onClick="{{ c.open }}" style="display:grid;grid-template-columns:1fr 210px 200px 150px;gap:28px;padding:26px 32px;border-bottom:1px solid var(--color-divider);cursor:pointer;align-items:center;background:{{ c.rowBg }}" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+            <div>
+              <div style="font-family:var(--font-heading);font-weight:800;font-size:21px;margin-bottom:5px">{{ c.party }}</div>
+              <div style="font-size:14.5px;line-height:1.6;color:color-mix(in srgb,var(--color-text) 65%,transparent);max-width:580px">{{ c.note }}</div>
+            </div>
+            <div>
+              <div style="font-size:15px">{{ c.kind }}</div>
+              <div style="font-size:13px;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ c.side }}</div>
+            </div>
+            <div>
+              <div style="font-size:15px;font-variant-numeric:tabular-nums">{{ c.midBig }}</div>
+              <div style="font-size:13px;color:color-mix(in srgb,var(--color-text) 55%,transparent);font-variant-numeric:tabular-nums">{{ c.midCaption }}</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:15px;color:{{ c.findColor }}">{{ c.findLabel }}</div>
+              <div style="font-size:13px;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ c.owner }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- ══════ CONTRACT DETAIL ══════ -->
+    <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding:26px 32px 24px;border-bottom:2px solid var(--color-divider);display:flex;gap:36px;align-items:flex-end;flex-wrap:wrap">
+          <div>
+            <button onClick="{{ goContracts }}" class="btn btn-ghost" style="font-size:13px;padding:0;margin-bottom:10px">← All contracts</button>
+            <h3 style="margin:0 0 8px;font-size:28px">{{ dParty }}</h3>
+            <div style="font-size:14.5px;color:color-mix(in srgb,var(--color-text) 65%,transparent);line-height:1.55;max-width:760px">{{ dSummaryLine }}</div>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:0;border-left:2px solid var(--color-divider)">
+            <div style="padding:0 26px">
+              <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">Attention score</div>
+              <div style="font-family:var(--font-heading);font-weight:800;font-size:40px;line-height:1.1;font-variant-numeric:tabular-nums;color:{{ dRiskColor }}">{{ dRisk }}</div>
+              <div style="font-size:12.5px;color:color-mix(in srgb,var(--color-text) 55%,transparent);max-width:180px;line-height:1.45">{{ dRiskCaption }}</div>
+            </div>
+            <div style="padding:0 0 0 26px;border-left:1px solid var(--color-divider)">
+              <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">Who holds the choices</div>
+              <div style="font-family:var(--font-heading);font-weight:800;font-size:40px;line-height:1.1;font-variant-numeric:tabular-nums">{{ dPower }}</div>
+              <div style="font-size:12.5px;color:color-mix(in srgb,var(--color-text) 55%,transparent);max-width:200px;line-height:1.45">{{ dPowerNote }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;border-bottom:2px solid var(--color-divider);background:var(--color-surface);flex-wrap:wrap">
+          <sc-for list="{{ detailTabs }}" as="t" hint-placeholder-count="4">
+            <button onClick="{{ t.go }}" style="border:0;border-right:1px solid var(--color-divider);background:{{ t.bg }};cursor:pointer;font-family:var(--font-heading);font-weight:800;font-size:13px;padding:13px 22px;color:{{ t.fg }}">{{ t.label }}</button>
+          </sc-for>
+          <div style="margin-left:auto;padding:0 32px;font-size:13px;color:color-mix(in srgb,var(--color-text) 58%,transparent)">{{ dVerifyNote }}</div>
+        </div>
+
+        <sc-if value="{{ tabIsFindings }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <sc-for list="{{ detailFindings }}" as="f" hint-placeholder-count="5">
+              <div onClick="{{ f.select }}" style="border-bottom:1px solid var(--color-divider);padding:26px 32px;cursor:pointer;display:grid;grid-template-columns:172px 1fr;gap:32px" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+                <div>
+                  <span class="tag" style="{{ f.sevStyle }}">{{ f.sevLabel }}</span>
+                  <div style="font-size:12.5px;margin-top:11px;color:color-mix(in srgb,var(--color-text) 52%,transparent)">{{ f.kindLabel }}</div>
+                  <div style="font-size:12.5px;margin-top:4px;color:color-mix(in srgb,var(--color-text) 45%,transparent);font-variant-numeric:tabular-nums">{{ f.evLabel }}</div>
+                </div>
+                <div style="max-width:840px">
+                  <div style="font-family:var(--font-heading);font-weight:800;font-size:20px;line-height:1.3;margin-bottom:9px;text-wrap:pretty">{{ f.title }}</div>
+                  <div style="font-size:15.5px;line-height:1.7;color:color-mix(in srgb,var(--color-text) 80%,transparent)">{{ f.explanation }}</div>
+                  <div style="display:flex;gap:16px;align-items:baseline;margin-top:16px;padding-top:16px;border-top:1px solid var(--color-divider);flex-wrap:wrap">
+                    <span style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-family:var(--font-heading);font-weight:800;color:var(--color-accent-700);flex:none">What to do</span>
+                    <span style="font-size:15px;line-height:1.65;flex:1;min-width:280px">{{ f.todo }}</span>
+                    <span style="font-size:13.5px;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ f.ownerLine }}</span>
+                  </div>
+                  <div style="margin-top:12px"><span class="btn btn-ghost" style="font-size:13px;padding:0">{{ f.evidenceCta }}</span></div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ tabIsClauses }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="padding:20px 32px;border-bottom:1px solid var(--color-divider);font-size:15px;color:color-mix(in srgb,var(--color-text) 65%,transparent);line-height:1.6">These are the clauses that currently apply. Pick any one to read it where it sits in the document.</div>
+            <sc-for list="{{ detailClauses }}" as="c" hint-placeholder-count="8">
+              <div onClick="{{ c.select }}" style="display:grid;grid-template-columns:240px 1fr 156px;gap:28px;padding:20px 32px;border-bottom:1px solid var(--color-divider);cursor:pointer;align-items:baseline" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+                <div>
+                  <div style="font-family:var(--font-heading);font-weight:800;font-size:15px">{{ c.type }}</div>
+                  <div style="font-size:12px;color:color-mix(in srgb,var(--color-text) 48%,transparent);font-variant-numeric:tabular-nums">{{ c.offsets }}</div>
+                </div>
+                <div style="font-size:15px;font-style:italic;line-height:1.7">“{{ c.quote }}”</div>
+                <div style="text-align:right"><span class="tag" style="{{ c.favStyle }}">{{ c.favors }}</span></div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ tabIsRisk }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="padding:20px 32px;border-bottom:1px solid var(--color-divider);font-size:15px;color:color-mix(in srgb,var(--color-text) 65%,transparent);max-width:860px;line-height:1.65">The score is a fixed rubric applied to clauses we verified. No part of it was generated — you can add the points up yourself, and every line opens the wording behind it.</div>
+            <sc-for list="{{ riskAxes }}" as="a" hint-placeholder-count="5">
+              <div style="padding:26px 32px;border-bottom:1px solid var(--color-divider);display:grid;grid-template-columns:minmax(280px,1fr) minmax(380px,1.5fr);gap:36px">
+                <div>
+                  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:12px">
+                    <span style="font-family:var(--font-heading);font-weight:800;font-size:17px">{{ a.axis }}</span>
+                    <span style="margin-left:auto;font-family:var(--font-heading);font-weight:800;font-size:26px;font-variant-numeric:tabular-nums;color:{{ a.color }}">{{ a.score }}</span>
+                    <span style="font-size:12.5px;color:color-mix(in srgb,var(--color-text) 45%,transparent)">of 100</span>
+                  </div>
+                  <div style="height:10px;background:var(--color-neutral-200)">
+                    <div style="height:10px;background:{{ a.color }};width:{{ a.pct }}"></div>
+                  </div>
+                </div>
+                <div>
+                  <sc-for list="{{ a.contrib }}" as="k" hint-placeholder-count="3">
+                    <div onClick="{{ k.select }}" style="display:grid;grid-template-columns:56px 1fr;gap:14px;font-size:15px;padding:9px 0;cursor:pointer;color:{{ k.color }};line-height:1.6" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+                      <span style="font-variant-numeric:tabular-nums;font-family:var(--font-heading);font-weight:800">{{ k.pts }}</span>
+                      <span>{{ k.label }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ tabIsExit }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="padding:28px 32px;border-bottom:1px solid var(--color-divider)">
+              <div style="font-size:15px;color:color-mix(in srgb,var(--color-text) 65%,transparent);margin-bottom:22px;line-height:1.65;max-width:760px">Pick a date you'd want to be out by. Every line recomputes from the charging provisions in the document.</div>
+              <div style="display:flex;gap:40px;align-items:flex-end;flex-wrap:wrap">
+                <div class="field" style="width:240px">
+                  <label style="font-size:13px">Date you'd want to be out by</label>
+                  <input class="input" type="date" value="{{ exitDate }}" onChange="{{ setExitDate }}" style="min-height:46px;font-size:15px" />
+                </div>
+                <div>
+                  <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">It would cost you</div>
+                  <div style="font-family:var(--font-heading);font-weight:800;font-size:44px;line-height:1.05;font-variant-numeric:tabular-nums">{{ exitTotal }}</div>
+                  <div style="font-size:13px;color:color-mix(in srgb,var(--color-text) 55%,transparent)">four charges, each traced to wording</div>
+                </div>
+              </div>
+            </div>
+            <sc-for list="{{ exitLines }}" as="l" hint-placeholder-count="4">
+              <div onClick="{{ l.select }}" style="padding:20px 32px;border-bottom:1px solid var(--color-divider);cursor:pointer;display:grid;grid-template-columns:1fr 180px;gap:28px" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+                <div style="max-width:720px">
+                  <div style="font-family:var(--font-heading);font-weight:800;font-size:16.5px;margin-bottom:4px">{{ l.label }}</div>
+                  <div style="font-size:13.5px;color:color-mix(in srgb,var(--color-text) 60%,transparent);font-variant-numeric:tabular-nums">{{ l.formula }}</div>
+                  <sc-if value="{{ l.hasQuote }}" hint-placeholder-val="{{ true }}">
+                    <div style="border-left:2px solid var(--color-accent);padding:3px 0 3px 12px;margin-top:9px;font-size:14.5px;font-style:italic;line-height:1.65">“{{ l.quote }}”</div>
+                  </sc-if>
+                </div>
+                <div style="text-align:right;font-size:19px;font-variant-numeric:tabular-nums;font-family:var(--font-heading);font-weight:800">{{ l.amount }}</div>
+              </div>
+            </sc-for>
+            <div style="margin:32px;padding:28px 32px;background:var(--color-accent);color:var(--color-bg);max-width:880px">
+              <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.85;margin-bottom:10px">Worth knowing</div>
+              <div style="font-family:var(--font-heading);font-weight:800;font-size:24px;line-height:1.3">{{ exitCounterfactual }}</div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ tabIsSource }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="padding:18px 32px;border-bottom:1px solid var(--color-divider);display:flex;gap:16px;align-items:baseline;flex-wrap:wrap">
+              <span style="font-size:13.5px;font-variant-numeric:tabular-nums">{{ dFilename }}</span>
+              <span style="font-size:13.5px;color:color-mix(in srgb,var(--color-text) 58%,transparent)">Highlighted text is what we relied on. Click any highlight to see what it supports.</span>
+            </div>
+            <div style="padding:32px;max-width:900px;font-size:15.5px;line-height:1.9;white-space:pre-wrap">
+              <sc-for list="{{ docSegs }}" as="s" hint-placeholder-count="12">
+                <span onClick="{{ s.click }}" style="{{ s.style }}">{{ s.text }}</span>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- ══════ FINDINGS ══════ -->
+    <sc-if value="{{ isFindings }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding:36px 32px 26px;border-bottom:2px solid var(--color-divider)">
+          <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:14px">Absence · beat two</div>
+          <h2 style="margin:0 0 12px;font-size:32px;max-width:900px;text-wrap:pretty">What to look at, worst first</h2>
+          <p style="margin:0;font-size:16px;line-height:1.65;max-width:800px;color:color-mix(in srgb,var(--color-text) 75%,transparent)">{{ findingsIntro }}</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:18px;padding:20px 32px;border-bottom:1px solid var(--color-divider);flex-wrap:wrap">
+          <div class="seg">
+            <label class="seg-opt"><input type="radio" name="sev" checked="{{ sevAll }}" onChange="{{ setSevAll }}" />Everything</label>
+            <label class="seg-opt"><input type="radio" name="sev" checked="{{ sevCrit }}" onChange="{{ setSevCrit }}" />Needs attention</label>
+            <label class="seg-opt"><input type="radio" name="sev" checked="{{ sevAbs }}" onChange="{{ setSevAbs }}" />Missing wording only</label>
+          </div>
+          <span style="font-size:14px;color:color-mix(in srgb,var(--color-text) 60%,transparent)">{{ findingsCount }}</span>
+        </div>
+        <sc-for list="{{ allFindings }}" as="f" hint-placeholder-count="8">
+          <div onClick="{{ f.openIn }}" style="display:grid;grid-template-columns:172px 210px 1fr;gap:28px;padding:24px 32px;border-bottom:1px solid var(--color-divider);cursor:pointer" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+            <div>
+              <span class="tag" style="{{ f.sevStyle }}">{{ f.sevLabel }}</span>
+              <div style="font-size:12.5px;margin-top:11px;color:color-mix(in srgb,var(--color-text) 52%,transparent)">{{ f.kindLabel }}</div>
+            </div>
+            <div>
+              <div style="font-size:15.5px;font-family:var(--font-heading);font-weight:800;margin-bottom:3px">{{ f.party }}</div>
+              <div style="font-size:13px;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ f.ownerLine }}</div>
+            </div>
+            <div style="max-width:800px">
+              <div style="font-family:var(--font-heading);font-weight:800;font-size:18.5px;line-height:1.3;margin-bottom:7px;text-wrap:pretty">{{ f.title }}</div>
+              <div style="font-size:15px;line-height:1.65;color:color-mix(in srgb,var(--color-text) 78%,transparent)">{{ f.explanation }}</div>
+              <div style="font-size:13px;margin-top:9px;color:color-mix(in srgb,var(--color-text) 48%,transparent);font-variant-numeric:tabular-nums">{{ f.evLabel }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- ══════ COVERAGE ══════ -->
+    <sc-if value="{{ isCoverage }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding:36px 32px 26px;border-bottom:2px solid var(--color-divider)">
+          <h2 style="margin:0 0 12px;font-size:32px">What's missing, across everything</h2>
+          <p style="margin:0;font-size:16px;line-height:1.65;max-width:820px;color:color-mix(in srgb,var(--color-text) 75%,transparent)">Each column is a protection your playbook says a contract of this kind should have. Blank cells are the interesting ones: nothing on the subject appears anywhere in the document.</p>
+        </div>
+        <div style="padding:26px 32px 40px;overflow-x:auto">
+          <div style="display:grid;grid-template-columns:250px repeat(7,1fr);min-width:1020px">
+            <div style="padding:0 12px 14px 0;border-bottom:2px solid var(--color-divider)"></div>
+            <sc-for list="{{ coverageCols }}" as="h" hint-placeholder-count="7">
+              <div style="padding:0 8px 14px;border-bottom:2px solid var(--color-divider);font-size:12px;letter-spacing:.04em;line-height:1.4;color:color-mix(in srgb,var(--color-text) 62%,transparent);font-family:var(--font-heading);font-weight:800">{{ h }}</div>
+            </sc-for>
+            <sc-for list="{{ coverageRows }}" as="r" hint-placeholder-count="6">
+              <div style="display:grid;grid-template-columns:250px repeat(7,1fr);grid-column:1 / -1">
+                <div style="padding:16px 12px 16px 0;border-bottom:1px solid var(--color-divider);font-size:15px;font-family:var(--font-heading);font-weight:800">{{ r.party }}</div>
+                <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="7">
+                  <div style="padding:16px 8px;border-bottom:1px solid var(--color-divider);border-left:1px solid var(--color-divider)">
+                    <div style="height:26px;display:flex;align-items:center;justify-content:flex-start;background:{{ c.bg }};padding:0 8px;font-size:11.5px;letter-spacing:.04em;color:{{ c.fg }};font-family:var(--font-heading);font-weight:800">{{ c.label }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:26px;margin-top:24px;font-size:13.5px;color:color-mix(in srgb,var(--color-text) 62%,transparent);flex-wrap:wrap">
+            <span>Present — wording found and quoted</span>
+            <span>Weak — present but below the playbook bar</span>
+            <span style="color:var(--color-accent-700);font-family:var(--font-heading);font-weight:800">Missing — nothing on the subject anywhere in the document</span>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ══════ FLOW-DOWN ══════ -->
+    <sc-if value="{{ isChain }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding:36px 32px 28px;border-bottom:2px solid var(--color-divider)">
+          <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:14px">Chain · beat three</div>
+          <h2 style="margin:0 0 12px;font-size:32px;max-width:900px;text-wrap:pretty">{{ chainHeadline }}</h2>
+          <p style="margin:0;font-size:16px;line-height:1.65;max-width:820px;color:color-mix(in srgb,var(--color-text) 75%,transparent)">{{ chainSubhead }}</p>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:2px solid var(--color-divider)">
+          <div style="padding:28px 32px;background:var(--color-surface)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:10px">What you receive</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:20px;margin-bottom:4px">Northwind Cloud Infrastructure</div>
+            <div style="font-size:13.5px;color:color-mix(in srgb,var(--color-text) 60%,transparent)">Your provider · $284,000 a year</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:46px;line-height:1.1;margin-top:18px;font-variant-numeric:tabular-nums">99.9%</div>
+            <div style="font-size:14px;line-height:1.55;margin-top:4px">uptime a month, and if they miss it you get back at most 10% of one month's charge</div>
+          </div>
+          <div style="padding:28px 32px;border-left:2px solid var(--color-divider)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:10px">What you promised</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:20px;margin-bottom:4px">Vantage Health Partners</div>
+            <div style="font-size:13.5px;color:color-mix(in srgb,var(--color-text) 60%,transparent)">Your customer · $520,000 a year</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:46px;line-height:1.1;margin-top:18px;font-variant-numeric:tabular-nums;color:var(--color-accent)">99.99%</div>
+            <div style="font-size:14px;line-height:1.55;margin-top:4px">uptime a month, with credits up to a full month's fee</div>
+          </div>
+          <div style="padding:28px 32px;border-left:2px solid var(--color-divider)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:10px">What you promised</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:20px;margin-bottom:4px">Ashgrove Logistics</div>
+            <div style="font-size:13.5px;color:color-mix(in srgb,var(--color-text) 60%,transparent)">Your customer · $410,000 a year</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:46px;line-height:1.1;margin-top:18px;font-variant-numeric:tabular-nums;color:var(--color-accent)">99.95%</div>
+            <div style="font-size:14px;line-height:1.55;margin-top:4px">uptime a month — raised by Amendment No. 1, with no matching change upstream</div>
+          </div>
+        </div>
+        <div style="padding:26px 32px 8px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">Clause by clause</div>
+        <div style="padding:10px 32px 28px">
+          <table class="table">
+            <thead>
+              <tr><th style="width:230px">What it covers</th><th>What you get</th><th>What you owe</th><th style="width:220px">The difference</th><th style="width:180px">If it goes wrong</th></tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{ gapRows }}" as="g" hint-placeholder-count="5">
+                <tr>
+                  <td style="font-family:var(--font-heading);font-weight:800;font-size:14.5px;padding:14px 8px">{{ g.dim }}</td>
+                  <td style="font-size:14.5px;padding:14px 8px">{{ g.received }}</td>
+                  <td style="font-size:14.5px;padding:14px 8px">{{ g.promised }}</td>
+                  <td style="font-size:14.5px;padding:14px 8px;color:var(--color-accent-700)">{{ g.gap }}</td>
+                  <td style="font-size:14.5px;padding:14px 8px;font-variant-numeric:tabular-nums">{{ g.exposure }}</td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+        <div style="margin:0 32px 36px;padding:30px 34px;background:var(--color-accent);color:var(--color-bg)">
+          <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.85;margin-bottom:12px">Where that leaves you</div>
+          <div style="font-family:var(--font-heading);font-weight:800;font-size:28px;line-height:1.28;max-width:960px;text-wrap:pretty">In a bad month you could owe Vantage Health up to $39,000 in credits and recover $4,333 from Northwind. You are covering the difference yourself.</div>
+          <div style="font-size:14.5px;margin-top:14px;opacity:.92;line-height:1.6;max-width:800px">Worked out from three quoted clauses: Vantage's monthly fee of $43,333 at a 100% credit ceiling, less Northwind's monthly charge of $23,667 at a 10% ceiling.</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ══════ SECURITY ══════ -->
+    <sc-if value="{{ isSecurity }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding:36px 32px 28px;border-bottom:2px solid var(--color-divider)">
+          <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:14px">Attack · beat four</div>
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap">
+            <span class="tag" style="background:var(--color-accent);color:var(--color-bg);font-family:var(--font-heading);font-weight:800;font-size:11.5px;letter-spacing:.1em;padding:5px 12px">HELD BACK</span>
+            <span style="font-size:13.5px;color:color-mix(in srgb,var(--color-text) 55%,transparent);font-variant-numeric:tabular-nums">{{ secFileLabel }}</span>
+          </div>
+          <h2 style="margin:0 0 12px;font-size:32px;max-width:940px;text-wrap:pretty">{{ secHeadline }}</h2>
+          <p style="margin:0;font-size:16px;line-height:1.65;max-width:840px;color:color-mix(in srgb,var(--color-text) 75%,transparent)">We caught them before the document reached our reader. It was passed through as data to be examined, never as instructions to follow, and we kept its dates out of your calendar. Nina Boateng in Legal has it.</p>
+          <div style="display:flex;gap:12px;margin-top:22px;flex-wrap:wrap">
+            <button class="btn btn-primary">Ask Tessellate for a clean copy</button>
+            <button class="btn btn-secondary">Download the report</button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:2px solid var(--color-divider)">
+          <div style="padding:28px 32px">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:12px">What a naive tool reports</div>
+            <div style="border:1px solid var(--color-divider);padding:22px 24px;background:var(--color-neutral-100)">
+              <div style="font-family:var(--font-heading);font-weight:800;font-size:26px;margin-bottom:10px">Risk: low</div>
+              <div style="font-size:15px;line-height:1.7;color:color-mix(in srgb,var(--color-text) 72%,transparent);font-style:italic">"This contract contains no unusual terms. No limitation of liability concerns identified. Auto-renewal notice period: 180 days."</div>
+              <div style="font-size:14px;margin-top:14px;color:var(--color-accent-700);line-height:1.6">Every one of those sentences came from the vendor, not from the agreement.</div>
+            </div>
+          </div>
+          <div style="padding:28px 32px;border-left:2px solid var(--color-divider)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:12px">What we report</div>
+            <div style="border:2px solid var(--color-accent);padding:22px 24px;background:var(--color-accent-100)">
+              <div style="font-family:var(--font-heading);font-weight:800;font-size:26px;margin-bottom:10px;color:var(--color-accent-700)">Waiting for a person</div>
+              <div style="font-size:15px;line-height:1.7">The real terms, read from the visible text only: liability is capped at three months of fees, the shortest cap you have with anyone. The hidden text changed nothing about the score.</div>
+            </div>
+          </div>
+        </div>
+        <div style="padding:26px 32px 8px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">The three payloads</div>
+        <sc-for list="{{ injections }}" as="i" hint-placeholder-count="3">
+          <div style="display:grid;grid-template-columns:280px 1fr;gap:28px;padding:22px 32px;border-top:1px solid var(--color-divider)">
+            <div>
+              <div style="font-family:var(--font-heading);font-weight:800;font-size:16px;margin-bottom:4px">{{ i.vector }}</div>
+              <div style="font-size:13.5px;color:color-mix(in srgb,var(--color-text) 60%,transparent);font-variant-numeric:tabular-nums">{{ i.where }}</div>
+              <div style="font-size:13.5px;color:var(--color-accent-700);margin-top:5px;line-height:1.5">Caught by: {{ i.detector }}</div>
+            </div>
+            <div style="border-left:2px solid var(--color-accent);padding:6px 0 6px 16px;font-size:15px;font-style:italic;line-height:1.7;max-width:820px">“{{ i.payload }}”</div>
+          </div>
+        </sc-for>
+        <div style="border-top:1px solid var(--color-divider);padding:24px 32px;font-size:14.5px;color:color-mix(in srgb,var(--color-text) 60%,transparent);max-width:880px;line-height:1.65">We look for text too small to read, text the same colour as the page, glyphs printed outside the page edge, and instructions tucked into file metadata. All of it before anything is sent to a model.</div>
+      </div>
+    </sc-if>
+
+    <!-- ══════ ACCURACY ══════ -->
+    <sc-if value="{{ isEval }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding:36px 32px 28px;border-bottom:2px solid var(--color-divider)">
+          <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:14px">Proof · beat five</div>
+          <h2 style="margin:0 0 12px;font-size:32px">How often we're right</h2>
+          <p style="margin:0;font-size:16px;line-height:1.65;max-width:840px;color:color-mix(in srgb,var(--color-text) 75%,transparent)">{{ evalIntro }}</p>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:2px solid var(--color-divider)">
+          <div style="padding:26px 32px">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">Quotes that checked out</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:40px;line-height:1.1;font-variant-numeric:tabular-nums">{{ evalGrounding }}</div>
+            <div style="font-size:13.5px;line-height:1.55;margin-top:4px">{{ evalGroundingNote }}</div>
+          </div>
+          <div style="padding:26px 32px;border-left:2px solid var(--color-divider)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">Things we made up</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:40px;line-height:1.1;font-variant-numeric:tabular-nums">0</div>
+            <div style="font-size:13.5px;line-height:1.55;margin-top:4px">{{ evalZeroNote }}</div>
+          </div>
+          <div style="padding:26px 32px;border-left:2px solid var(--color-divider)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">Time per contract</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:40px;line-height:1.1;font-variant-numeric:tabular-nums">{{ evalLatency }}</div>
+            <div style="font-size:13.5px;line-height:1.55;margin-top:4px">{{ evalLatencyNote }}</div>
+          </div>
+          <div style="padding:26px 32px;border-left:2px solid var(--color-divider)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">Quotes tested character by character</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:40px;line-height:1.1;font-variant-numeric:tabular-nums">{{ evalSpans }}</div>
+            <div style="font-size:13.5px;line-height:1.55;margin-top:4px">{{ evalSpansNote }}</div>
+          </div>
+        </div>
+        <div style="padding:26px 32px 40px">
+          <table class="table">
+            <thead>
+              <tr><th>Clause type</th><th style="width:130px;text-align:right">Precision</th><th style="width:120px;text-align:right">Recall</th><th style="width:100px;text-align:right">F1</th><th style="width:90px;text-align:right">Examples</th><th style="width:290px">Where it struggles</th></tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{ evalRows }}" as="e" hint-placeholder-count="10">
+                <tr>
+                  <td style="font-size:14.5px;padding:13px 8px">{{ e.type }}</td>
+                  <td style="text-align:right;font-variant-numeric:tabular-nums;font-size:14.5px">{{ e.p }}</td>
+                  <td style="text-align:right;font-variant-numeric:tabular-nums;font-size:14.5px">{{ e.r }}</td>
+                  <td style="text-align:right;font-variant-numeric:tabular-nums;font-size:14.5px;font-family:var(--font-heading);font-weight:800;color:{{ e.f1Color }}">{{ e.f1 }}</td>
+                  <td style="text-align:right;font-variant-numeric:tabular-nums;font-size:13.5px;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ e.n }}</td>
+                  <td style="font-size:13.5px;color:color-mix(in srgb,var(--color-text) 62%,transparent);line-height:1.5">{{ e.note }}</td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+
+  <div style="border-top:2px solid var(--color-divider);padding:12px 32px;display:flex;align-items:center;gap:24px;font-size:12.5px;color:color-mix(in srgb,var(--color-text) 58%,transparent);flex-wrap:wrap">
+    <span>Nothing appears here that isn't quoted from your document.</span>
+    <span>Every date, score and comparison was computed, not written by a model.</span>
+    <span style="margin-left:auto">Not built yet: DocuSign, Drive and email connectors</span>
+  </div>
+
+  <!-- ══════ EVIDENCE DRAWER ══════ -->
+  <sc-if value="{{ drawerOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;z-index:40;display:flex;justify-content:flex-end">
+      <div onClick="{{ closeDrawer }}" style="position:absolute;inset:0;background:color-mix(in srgb, var(--color-neutral-900) 42%, transparent)"></div>
+      <div style="position:relative;width:min(680px,92vw);height:100%;background:var(--color-bg);border-left:2px solid var(--color-text);box-shadow:var(--shadow-lg);display:grid;grid-template-rows:auto auto 1fr auto">
+        <div style="padding:20px 26px;border-bottom:2px solid var(--color-divider);display:flex;align-items:flex-start;gap:16px">
+          <div>
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent-700);font-family:var(--font-heading);font-weight:800;margin-bottom:6px">Where this came from</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:19px;line-height:1.3;max-width:520px;text-wrap:pretty">{{ drawerTitle }}</div>
+            <div style="font-size:13px;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-top:6px;font-variant-numeric:tabular-nums">{{ drawerMeta }}</div>
+          </div>
+          <button onClick="{{ closeDrawer }}" class="btn btn-secondary btn-icon" style="margin-left:auto;flex:none;font-size:16px">✕</button>
+        </div>
+        <div style="padding:16px 26px;border-bottom:1px solid var(--color-divider);background:var(--color-surface)">
+          <sc-if value="{{ drawerHasQuote }}" hint-placeholder-val="{{ true }}">
+            <div>
+              <div style="border-left:2px solid var(--color-accent);padding:4px 0 4px 14px;font-size:15.5px;font-style:italic;line-height:1.7">“{{ drawerQuote }}”</div>
+              <div style="font-size:12.5px;color:color-mix(in srgb,var(--color-text) 50%,transparent);margin-top:8px;font-variant-numeric:tabular-nums">{{ drawerOffsets }}</div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ drawerIsAbsence }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px dashed var(--color-accent-400);padding:14px 16px;background:var(--color-accent-100)">
+              <div style="font-family:var(--font-heading);font-weight:800;font-size:15px;margin-bottom:5px">There is nothing to quote</div>
+              <div style="font-size:14.5px;line-height:1.65">{{ drawerPlaybook }}</div>
+            </div>
+          </sc-if>
+        </div>
+        <div ref="{{ docRef }}" style="overflow:auto;min-height:0;padding:22px 26px 60px;font-size:14.5px;line-height:1.9;white-space:pre-wrap;background:var(--color-neutral-100)">
+          <sc-for list="{{ docSegs }}" as="s" hint-placeholder-count="12">
+            <span onClick="{{ s.click }}" data-seg-active="{{ s.active }}" style="{{ s.style }}">{{ s.text }}</span>
+          </sc-for>
+        </div>
+        <div style="padding:14px 26px;border-top:2px solid var(--color-divider);display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <span style="font-size:13px;color:color-mix(in srgb,var(--color-text) 58%,transparent)">{{ drawerFooter }}</span>
+          <button onClick="{{ closeDrawer }}" class="btn btn-primary" style="margin-left:auto">Done</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;asOfDate&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;2026-08-27&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Clock&quot;},&quot;autoExpandDerivation&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Clock&quot;},&quot;severityFloor&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;critical&quot;,&quot;high&quot;,&quot;medium&quot;,&quot;low&quot;,&quot;info&quot;],&quot;default&quot;:&quot;info&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Findings&quot;},&quot;showOffsets&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Evidence&quot;}}">
+// ─────────────────────────────────────────────────────────
+// WIRED: every value below is fetched from the analysis API at runtime.
+// The design's mock corpus was removed. Shapes: api/viewmodel.py.
+// ─────────────────────────────────────────────────────────
+const API = '';
+let CONTRACTS = [], OBLIGATIONS = [], FINDINGS = [], GAPS = [];
+let INJECTIONS = [], EVAL = [], COVERAGE = [], COVERAGE_COLS = [];
+let UPLOAD_CHECKS = [], STATS = {}, EVAL_STATS = {}, AS_OF = '';
+
+const ASK_SUGGESTIONS = [
+  'When does Northwind renew, and what is the deadline to stop it?',
+  'Where are we exposed across contracts?',
+  'What is missing from the Helios NDA?',
+  'What would it cost to leave Northwind early?'
+];
+
+// Static on purpose: this describes OUR pipeline, not any contract's data.
+// It is the only copy on the page that is not derived from a document.
+const PIPELINE = [
+  ['01', 'We read the text and remember where every word sat',
+   'Character positions have to survive page joins, headers and hyphenation, or every quote we show you would drift.'],
+  ['02', 'We check the file for tampering',
+   'Text too small to read, text the same colour as the page, glyphs off the page edge, instructions in metadata. All of it before anything is sent to a model.'],
+  ['03', 'We turn wording into claims',
+   'The model does one job: converting language into structured claims. It is never asked to calculate anything.'],
+  ['04', 'We check every quote against your document',
+   'If a quoted span is not found in the source character for character, it is thrown away rather than shown to you.'],
+  ['05', 'We work out the dates and scores ourselves',
+   'Plain arithmetic over verified claims, with the working shown on every result.']
+];
+
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const SEV_ORDER = { critical:0, high:1, medium:2, low:3, info:4 };
+const SEV_LABEL = { critical:'Act on this', high:'Look at soon', medium:'Worth knowing', low:'Minor', info:'For the record' };
+
+class Component extends DCLogic {
+  state = { view:'deadlines', cid:null, tab:'findings', sel:null, drawerFinding:null, openOb:null, win:'90', sev:'all', role:'finance', exitDate:'2027-03-31', loaded:false, err:null, uploading:false, uploadMsg:'', exitCost:null, askQuestion:'', asking:false, askResult:null };
+
+  ms(s) { const p = String(s).split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); }
+  daysFrom(a, b) { return Math.round((this.ms(b) - this.ms(a)) / 86400000); }
+  fmt(s) { const p = String(s).split('-').map(Number); return p[2] + ' ' + MONTHS[p[1] - 1] + ' ' + p[0]; }
+  money(n) { return '$' + Math.round(n).toLocaleString('en-US'); }
+  today() { return AS_OF || this.props.asOfDate || '2026-08-27'; }
+  contract(id) { const r = CONTRACTS.filter(function (c) { return c.id === id; }); return r[0] || CONTRACTS[0]; }
+  quote(c, qid) {
+    const q = (c.quotes || []).filter(function (x) { return x.id === qid; })[0];
+    if (!q) return null;
+    /* Offsets are the ones the verifier checked, not a text search: repeated
+       wording would otherwise highlight the wrong occurrence. */
+    if (typeof q.start === 'number') return { q: q, start: q.start, end: q.end };
+    const i = c.doc.indexOf(q.text);
+    return i < 0 ? null : { q: q, start: i, end: i + q.text.length };
+  }
+  offsets(o) { if (this.props.showOffsets === false) return ''; const q = o.q || {}; const s = q.srcStart != null ? q.srcStart : o.start; const e = q.srcEnd != null ? q.srcEnd : o.end; return 'characters ' + s + '–' + e + (q.srcFile ? ' of ' + q.srcFile : ' of the document') + (q.page ? ' · page ' + q.page : ''); }
+  sevOk(sev) { const floor = this.props.severityFloor || 'info'; return SEV_ORDER[sev] <= SEV_ORDER[floor]; }
+  sevStyle(sev) {
+    if (sev === 'critical') return 'background:var(--color-accent-200);color:var(--color-accent-800);font-family:var(--font-heading);font-weight:800;font-size:11.5px;letter-spacing:.05em;padding:5px 12px';
+    if (sev === 'high') return 'background:var(--color-neutral-300);color:var(--color-neutral-900);font-family:var(--font-heading);font-weight:800;font-size:11.5px;letter-spacing:.05em;padding:5px 12px';
+    return 'background:transparent;border:1px solid var(--color-neutral-400);color:color-mix(in srgb,var(--color-text) 62%,transparent);font-size:11.5px;letter-spacing:.05em;padding:4px 11px';
+  }
+  scoreColor(n) { return n == null ? 'color-mix(in srgb,var(--color-text) 40%,transparent)' : (n >= 80 ? 'var(--color-accent)' : (n >= 60 ? 'var(--color-accent-700)' : 'var(--color-text)')); }
+  openDrawer(fid, qid) { this.setState({ drawerFinding: fid, sel: qid || null }); }
+
+  // ── WIRED: live data ────────────────────────────────────────────────
+  loadModel() {
+    const self = this;
+    return fetch(API + '/ui/model').then(function (r) { return r.json(); }).then(function (m) {
+      CONTRACTS = m.contracts; OBLIGATIONS = m.obligations; FINDINGS = m.findings;
+      GAPS = m.gaps; INJECTIONS = m.injections; EVAL = m.eval;
+      COVERAGE = m.coverage; COVERAGE_COLS = m.coverageCols;
+      UPLOAD_CHECKS = m.uploadChecks; STATS = m.stats || {};
+      EVAL_STATS = m.evalStats || {}; AS_OF = m.asOf;
+      self.setState({ loaded: true, err: null });
+      self.loadExit();
+    }).catch(function (e) { self.setState({ err: String(e) }); });
+  }
+
+  loadExit() {
+    const self = this, st = this.state;
+    const cid = st.cid || (CONTRACTS[0] && CONTRACTS[0].id);
+    if (!cid || !st.exitDate) return;
+    const body = new FormData();
+    body.append('exit_date', st.exitDate);
+    fetch(API + '/contracts/' + cid + '/termination-cost', { method: 'POST', body: body })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        const lines = (d.line_items || []).map(function (i) {
+          return { label: i.label, amount: i.amount, detail: i.detail || '',
+                   quote: i.clause_span ? i.clause_span.quote : '' };
+        });
+        self.setState({ exitCost: { cid: cid, lines: lines, total: d.total,
+                                    notes: d.notes || [] } });
+      }).catch(function () {});
+  }
+
+  runAsk(question) {
+    const self = this;
+    const q = (question || '').trim();
+    if (!q || this.state.asking) return;
+    this.setState({ asking: true, askQuestion: q });
+    const body = new FormData();
+    body.append('question', q);
+    fetch(API + '/ask', { method: 'POST', body: body })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.d.detail || 'ask failed');
+        self.setState({ asking: false, askResult: res.d });
+      })
+      .catch(function (err) {
+        self.setState({ asking: false, askResult: {
+          question: q, answer: 'Could not reach the analysis API: ' + err.message,
+          citations: [], sufficient: false, missing: '', considered: 0 } });
+      });
+  }
+
+  onPickFile(e) {
+    const self = this;
+    const file = e && e.target && e.target.files && e.target.files[0];
+    if (!file) return;
+    this.setState({ uploading: true, uploadMsg: 'Reading ' + file.name + '…' });
+    const body = new FormData();
+    body.append('files', file);
+    body.append('title', file.name);
+    body.append('counterparty', file.name.replace(/[-_.].*$/, ''));
+    body.append('our_role', 'buyer');
+    fetch(API + '/contracts', { method: 'POST', body: body })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.d.detail || 'upload failed');
+        self.setState({ uploading: false,
+                        uploadMsg: 'Analysed ' + file.name + '. ' +
+                                   res.d.clauses.length + ' clauses, ' +
+                                   res.d.findings.length + ' findings.' });
+        self.loadModel();
+      })
+      .catch(function (err) {
+        self.setState({ uploading: false, uploadMsg: 'Could not analyse: ' + err.message });
+      });
+  }
+
+  componentDidMount() { this.scrollToSel(); this.loadModel(); }
+  componentDidUpdate(pp, ps) { if (ps.sel !== this.state.sel || ps.drawerFinding !== this.state.drawerFinding) this.scrollToSel(); if (this.state.loaded && (ps.exitDate !== this.state.exitDate || ps.cid !== this.state.cid)) this.loadExit(); }
+  scrollToSel() {
+    const pane = this.docEl;
+    if (!pane) return;
+    const el = pane.querySelector('[data-seg-active="1"]');
+    pane.scrollTop = el ? Math.max(0, el.offsetTop - pane.clientHeight / 3) : 0;
+  }
+
+  renderVals() {
+    // ── WIRED: nothing renders until the API has answered
+    if (!this.state.loaded) {
+      return { isDeadlines: true, isUpload: false, isContracts: false,
+               isDetail: false, isFindings: false, isCoverage: false,
+               isChain: false, isSecurity: false, isEval: false,
+               deadlines: [], deadlinesEmpty: true, drawerOpen: false,
+               navGroups: [], contractRows: [], allFindings: [], gapRows: [],
+               injections: [], evalRows: [], coverageRows: [], coverageCols: [],
+               riskAxes: [], detailClauses: [], detailFindings: [], detailTabs: [],
+               docSegs: [], exitLines: [], pipelineSteps: [], uploadChecks: [],
+               isAsk: false, askHasAnswer: false, askCitations: [],
+               askSuggestions: [], askQuestion: '', askButtonLabel: 'Ask',
+               asOfLabel: this.state.err ? 'Cannot reach the analysis API' : 'Loading…',
+               deadlineHeadline: this.state.err ? 'The analysis API is not responding'
+                                                : 'Reading your contracts…',
+               deadlineSubhead: this.state.err
+                 ? String(this.state.err) + ' — is the server running?'
+                 : 'Fetching verified clauses and computed deadlines.',
+               statMissed: '—', statMissedNote: '', stat90: '—', stat90Note: '',
+               statHeld: '—', statHeldNote: '', findingsCount: '' };
+    }
+
+    const self = this;
+    const st = this.state;
+    const today = this.today();
+    const legal = st.role === 'legal';
+    const c = this.contract(st.cid) || CONTRACTS[0];
+    const go = function (v) { return function () { self.setState({ view: v }); }; };
+    const isOn = function (v) { return st.view === v || (v === 'contracts' && st.view === 'detail'); };
+    const navItem = function (v, label) { return { label: label, bg: isOn(v) ? 'var(--color-bg)' : 'transparent', fg: isOn(v) ? 'var(--color-accent)' : 'color-mix(in srgb,var(--color-text) 68%,transparent)', go: go(v) }; };
+
+    const navGroups = [
+      { beat: 'Money', items: [navItem('deadlines', 'Deadlines'), navItem('contracts', 'Contracts')] },
+      { beat: 'Absence', items: [navItem('findings', 'What to look at'), navItem('coverage', "What's missing")] },
+      { beat: 'Chain', items: [navItem('chain', 'Flow-down')] },
+      { beat: 'Attack', items: [navItem('security', 'Security'), navItem('upload', 'Add a document')] },
+      { beat: 'Proof', items: [navItem('eval', 'Accuracy')] },
+      { beat: 'Ask', items: [navItem('ask', 'Ask a question')] }
+    ];
+
+    // ── deadlines
+    const winDays = st.win === '30' ? 30 : (st.win === '90' ? 90 : 100000);
+    const scored = OBLIGATIONS.map(function (o) { return { o: o, d: self.daysFrom(today, o.due), oc: self.contract(o.cid) }; }).sort(function (a, b) { return a.d - b.d; });
+    const shown = scored.filter(function (r) { return r.d < 0 || r.d <= winDays; });
+    const deadlines = shown.map(function (r) {
+      const o = r.o, d = r.d;
+      const derivation = o.derivation.map(function (s, i) {
+        const ev = s[2] ? self.quote(r.oc, s[2]) : null;
+        return {
+          n: String(i + 1).padStart(2, '0'),
+          tag: s[0] === 'quoted' ? 'Quoted' : 'Worked out',
+          tagColor: s[0] === 'quoted' ? 'var(--color-accent)' : 'color-mix(in srgb,var(--color-text) 52%,transparent)',
+          text: s[1], hasQuote: !!ev, quote: ev ? ev.q.text : '', offsets: ev ? self.offsets(ev) : ''
+        };
+      });
+      const open = self.props.autoExpandDerivation === true || st.openOb === o.id;
+      const urgent = d < 0 || (o.urgent && d <= 30);
+      return {
+        daysBig: d < 0 ? String(Math.abs(d)) : String(d),
+        daysWord: d < 0 ? 'days overdue' : (d === 1 ? 'day from now' : 'days from now'),
+        daysColor: urgent ? 'var(--color-accent)' : 'var(--color-text)',
+        dueLabel: self.fmt(o.due), party: r.oc.party, plain: o.plain, metaLine: o.meta, owner: r.oc.owner,
+        hasFlag: !!o.flag, flag: o.flag,
+        flagStyle: d < 0 ? 'background:var(--color-accent);color:var(--color-bg);font-family:var(--font-heading);font-weight:800;font-size:11px;letter-spacing:.08em;padding:4px 10px' : 'background:var(--color-neutral-300);color:var(--color-neutral-900);font-size:11px;letter-spacing:.06em;padding:4px 10px',
+        rightBig: legal ? o.kind : (o.kind === 'Report you owe' ? 'No fee attached' : self.money(r.oc.value)),
+        rightCaption: legal ? r.oc.kind : (o.kind === 'Report you owe' ? 'an obligation, not a spend' : 'a year of spend hangs on this date'),
+        rowBg: open ? 'var(--color-accent-100)' : 'transparent',
+        expandLabel: open ? 'Hide the working' : 'How did we get this?',
+        open: open, derivation: derivation,
+        toggle: function () { self.setState({ openOb: st.openOb === o.id ? null : o.id }); },
+        openContract: function (e) { if (e) e.stopPropagation(); self.setState({ view: 'detail', cid: o.cid, tab: legal ? 'clauses' : 'findings' }); }
+      };
+    });
+    const missed = scored.filter(function (r) { return r.d < 0; });
+    const next90 = scored.filter(function (r) { return r.d >= 0 && r.d <= 90; });
+    const val90 = next90.reduce(function (s, r) { return s + (r.o.kind === 'Report you owe' ? 0 : r.oc.value); }, 0);
+    const beyond = scored.filter(function (r) { return r.d > winDays; })[0];
+    const nextUrgent = scored.filter(function (r) { return r.d >= 0; })[0];
+
+    // ── contracts
+    const contractRows = CONTRACTS.map(function (x) {
+      const fs = FINDINGS.filter(function (f) { return f.cid === x.id; });
+      const crit = fs.filter(function (f) { return f.sev === 'critical'; }).length;
+      return {
+        party: x.party, note: x.note, kind: x.kind, side: x.side, owner: x.owner,
+        midBig: legal ? (x.quotes || []).length + ' clauses read' : self.money(x.value) + ' a year',
+        midCaption: x.id === 'tessellate' ? 'dates not scheduled' : 'runs to ' + self.fmt(x.termEnd),
+        findLabel: crit ? crit + ' to act on, ' + fs.length + ' in total' : fs.length + ' worth a look',
+        findColor: crit ? 'var(--color-accent-700)' : 'color-mix(in srgb,var(--color-text) 68%,transparent)',
+        rowBg: x.id === 'tessellate' ? 'var(--color-accent-100)' : 'transparent',
+        open: function () { self.setState({ view: 'detail', cid: x.id, tab: legal ? 'clauses' : 'findings' }); }
+      };
+    });
+
+    // ── findings
+    const mkFinding = function (f) {
+      const fc = self.contract(f.cid);
+      const ev = f.ev.map(function (q) { return self.quote(fc, q); }).filter(Boolean);
+      const first = ev[0] || null;
+      return {
+        sevLabel: SEV_LABEL[f.sev], sevStyle: self.sevStyle(f.sev), kindLabel: f.kind,
+        title: f.title, explanation: f.ex || f.playbook || '', party: fc.party, ownerLine: fc.owner,
+        evLabel: f.ev.length === 0 ? 'nothing to quote — this is about absent wording' : (ev.length === 1 ? 'one quoted passage' : ev.length + ' quoted passages'),
+        todo: f.todo,
+        evidenceCta: f.ev.length === 0 ? 'Show me what we searched →' : 'Show me where this is written →',
+        select: function () { self.openDrawer(f.id, first ? first.q.id : null); },
+        openIn: function () { self.setState({ view: 'detail', cid: f.cid, tab: legal ? 'clauses' : 'findings', drawerFinding: f.id, sel: first ? first.q.id : null }); }
+      };
+    };
+    const detailFindings = FINDINGS.filter(function (f) { return f.cid === c.id && self.sevOk(f.sev); }).sort(function (a, b) { return SEV_ORDER[a.sev] - SEV_ORDER[b.sev]; }).map(mkFinding);
+    const filtered = FINDINGS.filter(function (f) {
+      if (!self.sevOk(f.sev)) return false;
+      if (st.sev === 'crit') return f.sev === 'critical' || f.sev === 'high';
+      if (st.sev === 'abs') return f.ev.length === 0;
+      return true;
+    }).sort(function (a, b) { return SEV_ORDER[a.sev] - SEV_ORDER[b.sev]; });
+
+    // ── clauses, risk
+    const detailClauses = (c.quotes || []).map(function (q) {
+      const o = self.quote(c, q.id);
+      if (!o) return null;
+      const label = { us: 'Helps you', counterparty: 'Helps them', mutual: 'Even', na: 'Neither' }[q.favors] || 'Neither';
+      return {
+        type: q.type, quote: q.text, offsets: 'characters ' + o.start + '–' + o.end, favors: label,
+        favStyle: q.favors === 'counterparty' ? 'background:var(--color-accent-200);color:var(--color-accent-800);font-size:11.5px;padding:4px 11px' : 'background:transparent;border:1px solid var(--color-neutral-400);color:color-mix(in srgb,var(--color-text) 62%,transparent);font-size:11.5px;padding:3px 10px',
+        select: function () { self.openDrawer(null, q.id); }
+      };
+    }).filter(Boolean);
+
+    const riskAxes = (c.axes || []).map(function (a) {
+      return {
+        axis: a.axis, score: String(a.score), pct: a.score + '%', color: self.scoreColor(a.score),
+        contrib: a.contrib.map(function (k) {
+          return {
+            pts: k[0], label: k[1],
+            color: k[2] ? 'var(--color-text)' : 'color-mix(in srgb,var(--color-text) 62%,transparent)',
+            select: function () { if (k[2]) self.openDrawer(null, k[2]); }
+          };
+        })
+      };
+    });
+
+    // ── document segments
+    const spans = (c.quotes || []).map(function (q) { return self.quote(c, q.id); }).filter(Boolean).sort(function (a, b) { return a.start - b.start; });
+    const segs = [];
+    let cur = 0;
+    spans.forEach(function (s) {
+      if (s.start < cur) return;
+      if (s.start > cur) segs.push({ text: c.doc.slice(cur, s.start), style: 'color:inherit', active: '0', click: function () {} });
+      const isSel = st.sel === s.q.id;
+      segs.push({
+        text: c.doc.slice(s.start, s.end),
+        style: isSel ? 'background:var(--color-accent);color:var(--color-bg);cursor:pointer' : 'background:var(--color-accent-200);cursor:pointer',
+        active: isSel ? '1' : '0',
+        click: function () { self.setState({ sel: s.q.id }); }
+      });
+      cur = s.end;
+    });
+    if (cur < c.doc.length) segs.push({ text: c.doc.slice(cur), style: 'color:inherit', active: '0', click: function () {} });
+    const selSpan = spans.filter(function (s) { return s.q.id === st.sel; })[0];
+
+    // ── exit cost
+    const apiExit = st.exitCost && st.exitCost.cid === c.id ? st.exitCost : null;
+    const monthly = c.value / 12;
+    const horizon = c.renewalEnd || c.termEnd;
+    const remDays = Math.max(0, this.daysFrom(st.exitDate, horizon));
+    const remMonths = remDays / 30.44;
+    const remFees = monthly * remMonths;
+    const etc = remFees * 0.25;
+    const exportFee = 11400;
+    const forfeit = 6200;
+    const exitLines = apiExit ? apiExit.lines.map(function (l) {
+      return { label: l.label, amount: self.money(l.amount), formula: l.detail,
+               hasQuote: !!l.quote, quote: l.quote || '',
+               select: function () { if (l.qid) self.openDrawer(null, l.qid); } };
+    }) : [
+      { label: 'Fees for the rest of the term', amount: this.money(remFees), formula: this.money(monthly) + ' a month × ' + remMonths.toFixed(1) + ' months (' + this.fmt(st.exitDate) + ' to ' + this.fmt(horizon) + ')', hasQuote: false, quote: '', qid: null },
+      { label: 'Charge for leaving early', amount: this.money(etc), formula: '25% of ' + this.money(remFees) + ', described as liquidated damages rather than a penalty', hasQuote: true, quote: 'twenty-five percent (25%) of the fees that would have become due for the remainder of the term', qid: 'nw-etc' },
+      { label: 'Getting your data out', amount: this.money(exportFee), formula: 'estimated 40 hours at $285 an hour, their professional services rate', hasQuote: true, quote: "only upon Customer's written request and payment of Provider's then-current professional services rates", qid: 'nw-export' },
+      { label: 'Prepaid support hours you would lose', amount: this.money(forfeit), formula: '62 hours bought and not used', hasQuote: false, quote: '', qid: null }
+    ].map(function (l) {
+      return { label: l.label, amount: l.amount, formula: l.formula, hasQuote: l.hasQuote, quote: l.quote, select: function () { if (l.qid) self.openDrawer(null, l.qid); } };
+    });
+    const total = apiExit ? apiExit.total : (remFees + etc + exportFee + forfeit);
+
+    // ── tabs
+    const tabs = [['findings', 'What to look at'], ['clauses', 'Clauses'], ['risk', 'How the score was built'], ['exit', 'Cost of leaving'], ['source', 'The document']];
+    const detailTabs = tabs.map(function (t) {
+      const on = st.tab === t[0];
+      return { label: t[1], bg: on ? 'var(--color-bg)' : 'transparent', fg: on ? 'var(--color-accent)' : 'color-mix(in srgb,var(--color-text) 62%,transparent)', go: function () { self.setState({ tab: t[0] }); } };
+    });
+
+    // ── coverage
+    const cellStyle = { present: ['transparent', 'color-mix(in srgb,var(--color-text) 55%,transparent)', 'Present'], weak: ['var(--color-neutral-300)', 'var(--color-neutral-900)', 'Weak'], missing: ['var(--color-accent-200)', 'var(--color-accent-800)', 'Missing'] };
+    const coverageRows = COVERAGE.map(function (row) {
+      const cc = self.contract(row[0]);
+      return { party: cc.party, cells: row.slice(1).map(function (v) { const s = cellStyle[v]; return { bg: s[0], fg: s[1], label: s[2] }; }) };
+    });
+
+    // ── drawer
+    const df = st.drawerFinding ? FINDINGS.filter(function (f) { return f.id === st.drawerFinding; })[0] : null;
+    const drawerOpen = !!(df || st.sel);
+
+    return {
+      asOfLabel: 'Today is ' + this.fmt(today), navGroups: navGroups,
+      isDeadlines: st.view === 'deadlines', isUpload: st.view === 'upload', isContracts: st.view === 'contracts',
+      isDetail: st.view === 'detail', isFindings: st.view === 'findings', isCoverage: st.view === 'coverage',
+      isChain: st.view === 'chain', isSecurity: st.view === 'security', isEval: st.view === 'eval',
+      goContracts: go('contracts'), goSecurity: go('security'), goUpload: go('upload'),
+      // ── WIRED: values that used to be written into the design
+      statHeld: String(STATS.held || 0),
+      statHeldNote: (STATS.held || 0) === 0
+        ? 'Nothing is being withheld. Every document passed the tampering checks.'
+        : 'Held back for a person to look at. We do not put dates in your calendar from a document we do not trust.',
+      findingsIntro: (STATS.findings || 0) + ' things across ' +
+        (STATS.contracts || 0) + ' contracts. ' + (STATS.absenceFindings || 0) +
+        ' of them are about wording that is not in the document at all — the kind of gap a folder of PDFs will never show you.',
+      evalIntro: 'Measured on ' + (EVAL_STATS.documents || 0) +
+        ' held-out contracts against a hand-written gold standard, using ' +
+        (EVAL_STATS.model || 'the extraction model') + '. Every clause type we score is here, including the ones we are bad at.',
+      evalGrounding: EVAL_STATS.groundingRate != null
+        ? (EVAL_STATS.groundingRate * 100).toFixed(1) + '%' : '—',
+      evalGroundingNote: (EVAL_STATS.discarded || 0) === 0
+        ? 'every quote matched the source document exactly'
+        : EVAL_STATS.discarded + ' were thrown away before you saw them',
+      evalZeroNote: 'a claim without matching text in your document cannot be displayed',
+      evalLatency: EVAL_STATS.medianLatency != null ? EVAL_STATS.medianLatency + 's' : '—',
+      evalLatencyNote: EVAL_STATS.medianLatency != null
+        ? 'median per contract' : 'scored from cache, so not timed',
+      evalSpans: String(EVAL_STATS.spansChecked || 0),
+      evalSpansNote: 'all ' + (EVAL_STATS.spansExact || 0) + ' matched the document exactly',
+      secHeadline: (STATS.injections || 0) === 0
+        ? 'No hidden instructions found in any document'
+        : 'Someone hid ' + STATS.injections + ' instruction' +
+          ((STATS.injections === 1) ? '' : 's') + ' in a supplier document',
+      secFileLabel: (INJECTIONS[0] && INJECTIONS[0].where) || 'no flagged document',
+      lastUploadLabel: (INJECTIONS[0] && INJECTIONS[0].where) || 'nothing uploaded yet',
+      uploadAlertBody: (STATS.injections || 0) === 0
+        ? 'Nothing suspicious in the documents processed so far.'
+        : STATS.injections + ' pieces of hidden text were trying to tell our reader what to conclude. We kept that document out of your schedule and flagged it for Security.',
+      chainHeadline: (STATS.gaps || 0) === 0
+        ? 'Everything you promised is covered by what you were given'
+        : 'You promised your customers more than your suppliers promised you',
+      chainSubhead: (STATS.gaps || 0) + ' differences across ' + (STATS.contracts || 0) +
+        ' contracts, read together. Every figure below is quoted from one of them; the differences are arithmetic.',
+      uploadStatus: this.state.uploadMsg || '',
+      onPickFile: this.onPickFile.bind(this),
+
+      // ── WIRED: Ask
+      isAsk: st.view === 'ask',
+      askQuestion: st.askQuestion || '',
+      setAskQuestion: function (e) {
+        self.setState({ askQuestion: e && e.target ? e.target.value : '' });
+      },
+      submitAsk: function () { self.runAsk(st.askQuestion); },
+      askButtonLabel: st.asking ? 'Reading the records…' : 'Ask',
+      askSuggestions: ASK_SUGGESTIONS.map(function (q) {
+        return { label: q, go: function () { self.runAsk(q); } };
+      }),
+      askHasAnswer: !!st.askResult,
+      askQuestionEcho: st.askResult ? st.askResult.question : '',
+      askAnswer: st.askResult ? st.askResult.answer : '',
+      askUnanswerable: !!(st.askResult && st.askResult.sufficient === false
+                          && st.askResult.missing),
+      askMissing: st.askResult && st.askResult.missing
+        ? 'The records do not cover ' + st.askResult.missing +
+          '. Rather than fill that in from what contracts usually say, we have left it out.'
+        : '',
+      askMeta: st.askResult
+        ? (st.askResult.considered + ' verified records were searched; ' +
+           st.askResult.citations.length + ' were used.')
+        : '',
+      askCitationsLabel: st.askResult && st.askResult.citations.length
+        ? 'What this rests on' : 'Nothing was cited',
+      askCitations: (st.askResult ? st.askResult.citations : []).map(function (c) {
+        return {
+          contract: c.contract, kind: c.kind, title: c.title,
+          kindColor: c.kind === 'absence' ? 'var(--color-accent)'
+                     : 'color-mix(in srgb,var(--color-text) 50%,transparent)',
+          hasQuote: !!c.quote, quote: c.quote || '',
+          isAbsence: !c.quote,
+          offsets: c.file && c.start != null
+            ? 'characters ' + c.start + '–' + c.end + ' of ' + c.file : '',
+          open: function () {
+            if (c.contract_id) self.setState({ view: 'detail', cid: c.contract_id });
+          }
+        };
+      }),
+      roleFinance: !legal, roleLegal: legal,
+      setFinance: function () { self.setState({ role: 'finance' }); }, setLegal: function () { self.setState({ role: 'legal', tab: 'clauses' }); },
+
+      deadlineHeadline: missed.length
+        ? 'One renewal already went through, and another decides itself in ' + (nextUrgent ? nextUrgent.d : 0) + ' days.'
+        : 'Nothing has slipped. The next decision is ' + (nextUrgent ? nextUrgent.d + ' days away.' : 'not yet scheduled.'),
+      deadlineSubhead: legal
+        ? 'Each date below was worked out from wording in the contract. Open any row to read the clauses it rests on.'
+        : (missed.length
+            ? missed[0].oc.party + ' renewed on ' + self.fmt(missed[0].o.due) +
+              ' because nobody wrote to them in time.' +
+              (nextUrgent ? ' ' + nextUrgent.oc.party + ' is next.' : '')
+            : (nextUrgent
+               ? nextUrgent.oc.party + ' is next, on ' + self.fmt(nextUrgent.o.due) +
+                 '. Every date here was worked out from wording we can show you.'
+               : 'Nothing is scheduled inside this window.')),
+      statMissed: String(missed.length),
+      statMissedNote: missed.length
+        ? missed[0].oc.party + ' renewed for another term'
+          + (missed[0].oc.value ? ' at ' + self.money(missed[0].oc.value) : '')
+          + ', and the fees cannot be cancelled.'
+        : 'Nothing has gone past its date.',
+      stat90: String(next90.length), stat90Note: this.money(val90) + ' of yearly spend is decided by these dates.',
+      win30: st.win === '30', win90: st.win === '90', winAll: st.win === 'all',
+      setWin30: function () { self.setState({ win: '30' }); }, setWin90: function () { self.setState({ win: '90' }); }, setWinAll: function () { self.setState({ win: 'all' }); },
+      deadlines: deadlines, deadlinesEmpty: deadlines.length === 0,
+      nextBeyond: beyond ? beyond.o.kind.toLowerCase() + ' for ' + beyond.oc.party + ' on ' + this.fmt(beyond.o.due) : 'further out',
+
+      pipelineSteps: PIPELINE.map(function (p) { return { n: p[0], title: p[1], body: p[2] }; }),
+      uploadChecks: UPLOAD_CHECKS.map(function (u) {
+        return { label: u[0], detail: u[2], status: u[1] === 'ok' ? 'Clear' : 'Flagged', dot: u[1] === 'ok' ? 'var(--color-neutral-500)' : 'var(--color-accent)' };
+      }),
+
+      contractRows: contractRows,
+      dParty: c.party, dRisk: c.risk == null ? '—' : String(c.risk), dRiskColor: this.scoreColor(c.risk), dRiskCaption: c.riskCaption,
+      dPower: c.power, dPowerNote: c.powerNote, dFilename: c.file,
+      dSummaryLine: legal
+        ? c.kind + ' · ' + c.governing + ' · effective ' + this.fmt(c.effective) + ' · runs to ' + this.fmt(c.termEnd) + ' · ' + c.owner
+        : c.kind + ' · ' + c.side + ' · ' + this.money(c.value) + ' a year · runs to ' + this.fmt(c.termEnd) + ' · looked after by ' + c.owner,
+      dVerifyNote: spans.length + ' of ' + (c.quotes || []).length + ' quotes matched the document. ' + ((c.quotes || []).length - spans.length) + ' were thrown away.',
+      detailTabs: detailTabs,
+      tabIsFindings: st.tab === 'findings', tabIsClauses: st.tab === 'clauses', tabIsRisk: st.tab === 'risk', tabIsExit: st.tab === 'exit', tabIsSource: st.tab === 'source',
+      detailFindings: detailFindings, detailClauses: detailClauses, riskAxes: riskAxes, docSegs: segs,
+
+      exitDate: st.exitDate, setExitDate: function (e) { self.setState({ exitDate: e.target.value }); },
+      exitTotal: this.money(total), exitLines: exitLines,
+      exitCounterfactual: 'Write to them by 15 September and the same exit costs you nothing.',
+
+      sevAll: st.sev === 'all', sevCrit: st.sev === 'crit', sevAbs: st.sev === 'abs',
+      setSevAll: function () { self.setState({ sev: 'all' }); }, setSevCrit: function () { self.setState({ sev: 'crit' }); }, setSevAbs: function () { self.setState({ sev: 'abs' }); },
+      allFindings: filtered.map(mkFinding), findingsCount: filtered.length + ' of ' + FINDINGS.length + ' shown',
+
+      coverageCols: COVERAGE_COLS, coverageRows: coverageRows,
+      gapRows: GAPS, injections: INJECTIONS,
+      evalRows: EVAL.map(function (e) {
+        return { type: e[0], p: e[1], r: e[2], f1: e[3], n: e[4], note: e[5], f1Color: parseFloat(e[3]) < 0.7 ? 'var(--color-accent-700)' : 'var(--color-text)' };
+      }),
+
+      drawerOpen: drawerOpen,
+      drawerTitle: df ? df.title : (selSpan ? selSpan.q.type : ''),
+      drawerMeta: c.party + ' · ' + c.file,
+      drawerHasQuote: !!selSpan, drawerQuote: selSpan ? selSpan.q.text : '', drawerOffsets: selSpan ? this.offsets(selSpan) : '',
+      drawerIsAbsence: !!(df && df.ev.length === 0), drawerPlaybook: df ? (df.playbook || '') : '',
+      drawerFooter: df && df.ev.length === 0 ? 'The document is below in full, so you can see there is nothing on the subject.' : 'Highlighted text is what we relied on. Click any highlight to switch to it.',
+      docRef: function (el) { self.docEl = el; },
+      closeDrawer: function () { self.setState({ drawerFinding: null, sel: null }); }
+    };
+  }
+}
+
+</script>
+</body>
+</html>

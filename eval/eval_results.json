@@ -1,0 +1,242 @@
+{
+  "rows": [
+    [
+      "Data protection",
+      "0.00",
+      "0.00",
+      "0.00",
+      "0",
+      "not in the gold set \u2014 1 extra extraction"
+    ],
+    [
+      "Notice period",
+      "0.50",
+      "0.50",
+      "0.50",
+      "2",
+      "weak \u2014 1 false positive(s), 1 missed"
+    ],
+    [
+      "Uncapped liability carveout",
+      "1.00",
+      "0.33",
+      "0.50",
+      "3",
+      "weak \u2014 0 false positive(s), 2 missed"
+    ],
+    [
+      "Payment terms",
+      "0.50",
+      "1.00",
+      "0.67",
+      "2",
+      "mixed \u2014 2 false positive(s), 0 missed"
+    ],
+    [
+      "Auto renewal",
+      "0.67",
+      "0.67",
+      "0.67",
+      "3",
+      "mixed \u2014 1 false positive(s), 1 missed"
+    ],
+    [
+      "Confidentiality",
+      "0.67",
+      "1.00",
+      "0.80",
+      "2",
+      "mixed \u2014 1 false positive(s), 0 missed"
+    ],
+    [
+      "Service level agreement",
+      "0.67",
+      "1.00",
+      "0.80",
+      "2",
+      "mixed \u2014 1 false positive(s), 0 missed"
+    ],
+    [
+      "Data retention deletion",
+      "1.00",
+      "0.67",
+      "0.80",
+      "3",
+      "mixed \u2014 0 false positive(s), 1 missed"
+    ],
+    [
+      "Termination for convenience",
+      "0.75",
+      "1.00",
+      "0.86",
+      "3",
+      "reliable"
+    ],
+    [
+      "Term",
+      "0.75",
+      "1.00",
+      "0.86",
+      "3",
+      "reliable"
+    ],
+    [
+      "Limitation of liability",
+      "0.75",
+      "1.00",
+      "0.86",
+      "3",
+      "reliable"
+    ],
+    [
+      "Indemnification",
+      "1.00",
+      "1.00",
+      "1.00",
+      "3",
+      "close to solved"
+    ],
+    [
+      "Breach notification",
+      "1.00",
+      "1.00",
+      "1.00",
+      "2",
+      "close to solved"
+    ],
+    [
+      "Price increase",
+      "1.00",
+      "1.00",
+      "1.00",
+      "2",
+      "close to solved"
+    ],
+    [
+      "Service level credit",
+      "1.00",
+      "1.00",
+      "1.00",
+      "2",
+      "close to solved"
+    ],
+    [
+      "Insurance",
+      "1.00",
+      "1.00",
+      "1.00",
+      "1",
+      "close to solved"
+    ],
+    [
+      "Venue",
+      "1.00",
+      "1.00",
+      "1.00",
+      "1",
+      "close to solved"
+    ],
+    [
+      "Audit rights",
+      "1.00",
+      "1.00",
+      "1.00",
+      "2",
+      "close to solved"
+    ],
+    [
+      "Unilateral amendment",
+      "1.00",
+      "1.00",
+      "1.00",
+      "2",
+      "close to solved"
+    ],
+    [
+      "Assignment",
+      "1.00",
+      "1.00",
+      "1.00",
+      "2",
+      "close to solved"
+    ],
+    [
+      "Support response time",
+      "1.00",
+      "1.00",
+      "1.00",
+      "2",
+      "close to solved"
+    ],
+    [
+      "Warranty",
+      "1.00",
+      "1.00",
+      "1.00",
+      "1",
+      "close to solved"
+    ],
+    [
+      "Early termination fee",
+      "1.00",
+      "1.00",
+      "1.00",
+      "2",
+      "close to solved"
+    ],
+    [
+      "Governing law",
+      "1.00",
+      "1.00",
+      "1.00",
+      "4",
+      "close to solved"
+    ],
+    [
+      "Subprocessors",
+      "1.00",
+      "1.00",
+      "1.00",
+      "2",
+      "close to solved"
+    ],
+    [
+      "Termination for cause",
+      "1.00",
+      "1.00",
+      "1.00",
+      "2",
+      "close to solved"
+    ],
+    [
+      "License grant",
+      "1.00",
+      "1.00",
+      "1.00",
+      "1",
+      "close to solved"
+    ],
+    [
+      "Non compete",
+      "1.00",
+      "1.00",
+      "1.00",
+      "1",
+      "close to solved"
+    ]
+  ],
+  "stats": {
+    "precision": 0.841,
+    "recall": 0.914,
+    "f1": 0.876,
+    "documents": 4,
+    "clauseTypes": 28,
+    "groundingRate": 1.0,
+    "spansChecked": 64,
+    "spansExact": 64,
+    "discarded": 0,
+    "medianLatency": null,
+    "cached": true,
+    "model": "openai/gpt-oss-120b"
+  }
+}

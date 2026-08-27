@@ -18,6 +18,7 @@ credible than one with none.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 import time
@@ -129,6 +130,48 @@ def evaluate(self_check: bool) -> int:
         p, r, f1 = prf(tp, fp, fn)
         flag = "  <-- weak" if f1 < 0.6 else ""
         print(f"{ctype:<34}{p:>7.2f}{r:>7.2f}{f1:>7.2f}{tp:>5}{fp:>5}{fn:>5}{flag}")
+
+    if "--json" in sys.argv:
+        out_rows = []
+        for ctype, (tp, fp, fn) in rows:
+            pp, rr, ff = prf(tp, fp, fn)
+            gold_n = tp + fn
+            if gold_n == 0:
+                note = (f"not in the gold set — {fp} extra extraction"
+                        + ("" if fp == 1 else "s"))
+            elif ff >= 0.95:
+                note = "close to solved"
+            elif ff >= 0.85:
+                note = "reliable"
+            elif ff >= 0.6:
+                note = f"mixed — {fp} false positive(s), {fn} missed"
+            else:
+                note = f"weak — {fp} false positive(s), {fn} missed"
+            out_rows.append([ctype.replace("_", " ").capitalize(),
+                             f"{pp:.2f}", f"{rr:.2f}", f"{ff:.2f}",
+                             str(gold_n), note])
+        pt, rt, ft = prf(*totals)
+        merged_stats = provenance[0]
+        for g in provenance[1:]:
+            merged_stats = merged_stats.merge(g)
+        payload = {
+            "rows": out_rows,
+            "stats": {
+                "precision": round(pt, 3), "recall": round(rt, 3), "f1": round(ft, 3),
+                "documents": len(EVAL_SET), "clauseTypes": len(per_type),
+                "groundingRate": round(grounded_total / max(1, grounded_total + dropped_total), 4),
+                "spansChecked": merged_stats.total,
+                "spansExact": merged_stats.exact,
+                "discarded": dropped_total,
+                "medianLatency": (None if "--cached" in sys.argv
+                                  else round(sorted(latencies)[len(latencies) // 2], 1)),
+                "cached": "--cached" in sys.argv,
+                "model": MODEL,
+            },
+        }
+        target = ROOT / "eval" / "eval_results.json"
+        target.write_text(json.dumps(payload, indent=2))
+        print(f"\n  wrote {target}")
 
     p, r, f1 = prf(*totals)
     total_claims = grounded_total + dropped_total

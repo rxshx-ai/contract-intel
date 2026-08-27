@@ -49,7 +49,8 @@ TENANT = "demo"          # single-tenant demo; every query still filters on it
 ACTOR = "demo@contoso.example"
 
 _conn = db.connect()
-_state: dict = {"bundles": [], "gaps": [], "today": date.today()}
+_state: dict = {"bundles": [], "gaps": [], "today": date.today(),
+                "upload_checks": [], "last_upload": {}, "ask_index": None}
 
 
 @asynccontextmanager
@@ -75,6 +76,7 @@ def _bundle(contract_id: str):
 
 def _refresh_portfolio() -> None:
     _state["gaps"] = analyze_portfolio(_state["bundles"])
+    _state["ask_index"] = None      # rebuilt lazily on the next question
 
 
 def load_demo(today: date) -> None:
@@ -356,6 +358,45 @@ def deadlines_ics():
     return PlainTextResponse("\r\n".join(lines), media_type="text/calendar")
 
 
+@app.post("/ask")
+def post_ask(question: str = Form(...), contract_id: str | None = Form(None)):
+    """Answer from the extracted layer only. Never from the raw contract."""
+    from api.ask import Index, ask, build_records
+
+    question = (question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+
+    index = _state.get("ask_index")
+    if index is None:
+        index = Index(build_records(_state["bundles"], _state["gaps"], _today()))
+        _state["ask_index"] = index
+
+    try:
+        answer = ask(question, index, contract_id=contract_id or None)
+    except ExtractionUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"Ask unavailable: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=502,
+                            detail=f"Ask failed against {llm_model()}: {exc}")
+
+    db.audit(_conn, TENANT, ACTOR, "ask", contract_id, question[:200])
+    return answer.to_dict()
+
+
+@app.get("/ui/model")
+def ui_model():
+    """Everything the designed front end renders, in the shapes it expects."""
+    from api.viewmodel import build_model
+
+    db.audit(_conn, TENANT, ACTOR, "view", "ui_model")
+    return build_model(
+        _state["bundles"], _state["gaps"], _today(),
+        upload_checks=_state.get("upload_checks") or [],
+        last_upload=_state.get("last_upload") or {},
+    )
+
+
 @app.get("/audit")
 def audit_log(limit: int = Query(100)):
     return db.read_audit(_conn, TENANT, limit)
@@ -363,7 +404,23 @@ def audit_log(limit: int = Query(100)):
 
 @app.get("/")
 def index():
+    """The designed front end. /raw serves the minimal test harness."""
+    wired = ROOT / "web" / "app" / "index.html"
+    return FileResponse(wired if wired.exists() else ROOT / "web" / "index.html")
+
+
+@app.get("/raw")
+def raw_index():
     return FileResponse(ROOT / "web" / "index.html")
 
 
+app.mount("/vendor", StaticFiles(directory=ROOT / "web" / "app" / "vendor"),
+          name="vendor")
+app.mount("/_ds", StaticFiles(directory=ROOT / "web" / "app" / "_ds"), name="ds")
 app.mount("/static", StaticFiles(directory=ROOT / "web"), name="static")
+
+
+@app.get("/support.js")
+def support_js():
+    return FileResponse(ROOT / "web" / "app" / "support.js",
+                        media_type="application/javascript")
