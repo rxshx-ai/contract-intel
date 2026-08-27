@@ -8,11 +8,21 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture(scope="module")
-def client():
-    from api import main
+def client(tmp_path_factory):
+    """A client backed by a throwaway store.
 
-    main.load_demo(date(2026, 8, 27))
-    with TestClient(main.app) as c:
+    The app's lifespan runs boot(), which restores whatever is in the
+    configured database -- so without this the suite's expectations depend on
+    what someone uploaded to their local Postgres earlier.
+    """
+    from api import main
+    from api.store import Store
+
+    tmp = tmp_path_factory.mktemp("api")
+    main._store = Store(url=None, sqlite_path=tmp / "api.db", tenant="test")
+    main._state["retriever"] = None
+    main._state["today"] = date(2026, 8, 27)   # boot() uses this; pin it
+    with TestClient(main.app) as c:          # lifespan -> boot() -> seeds demo
         yield c
 
 

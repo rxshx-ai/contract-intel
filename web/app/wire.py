@@ -28,6 +28,13 @@ def patch(label: str, find: str, replace: str) -> None:
 
 # ── 1. vendored React before the runtime, so it never reaches for a CDN ──
 patch(
+    "pulse keyframes",
+    "  ::-webkit-scrollbar { width: 12px; }",
+    "  @keyframes dcpulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }\n"
+    "  ::-webkit-scrollbar { width: 12px; }",
+)
+
+patch(
     "vendor react",
     '<script src="./support.js"></script>',
     '<script src="./vendor/react.production.min.js"></script>\n'
@@ -51,6 +58,62 @@ let INJECTIONS = [], EVAL = [], COVERAGE = [], COVERAGE_COLS = [];
 let UPLOAD_CHECKS = [], STATS = {}, EVAL_STATS = {}, AS_OF = '';
 
 function CAL_SUM(st) { return (st.calendar && st.calendar.summary) || {}; }
+
+function MODEL_LABEL(st) {
+  const h = st.health || {};
+  return { ok: 'Model ready', unknown: 'Model idle',
+           rate_limited: 'Model rate limited', error: 'Model unavailable',
+           no_key: 'No model connected' }[h.status] || 'Model unknown';
+}
+
+function MODEL_COLOR(st) {
+  const h = st.health || {};
+  if (h.status === 'ok') return 'var(--color-accent-700)';
+  if (h.status === 'unknown') return 'color-mix(in srgb,var(--color-text) 45%,transparent)';
+  return 'var(--color-accent)';
+}
+
+const CHANGE_ROWS = [
+  { key: 'clauses', label: 'clauses extracted' },
+  { key: 'actionable_dates', label: 'dates to act on' },
+  { key: 'calendar_events', label: 'calendar entries' },
+  { key: 'findings', label: 'things to look at' },
+  { key: 'flow_down_gaps', label: 'flow-down gaps' },
+  { key: 'contracts', label: 'contracts held' },
+];
+
+// Splits the document into plain and highlighted runs: the passages already
+// found, plus the window currently being read. Offsets are the real ones the
+// extractor reported, so the highlight is where the model actually worked.
+function buildReaderSegs(st) {
+  const text = st.upText || '';
+  if (!text) return [];
+  const marks = (st.upSpans || []).map(function (s) {
+    return { start: s.start, end: s.end, kind: 'found' };
+  });
+  if (st.upRead) marks.push({ start: st.upRead.start, end: st.upRead.end,
+                              kind: 'reading' });
+  marks.sort(function (a, b) { return a.start - b.start; });
+
+  const segs = [];
+  let cursor = 0;
+  marks.forEach(function (m) {
+    if (m.start < cursor) return;
+    if (m.start > cursor) segs.push({ text: text.slice(cursor, m.start),
+                                      style: 'color:inherit', active: '0' });
+    segs.push({
+      text: text.slice(m.start, m.end),
+      active: m.kind === 'reading' ? '1' : '0',
+      style: m.kind === 'reading'
+        ? 'background:var(--color-accent);color:var(--color-bg)'
+        : 'background:var(--color-accent-200)',
+    });
+    cursor = m.end;
+  });
+  if (cursor < text.length) segs.push({ text: text.slice(cursor),
+                                        style: 'color:inherit', active: '0' });
+  return segs;
+}
 
 const ASK_SUGGESTIONS = [
   'When does Northwind renew, and what is the deadline to stop it?',
@@ -148,6 +211,18 @@ patch(
     'max-width:320px">{{ statHeldNote }}</div>',
 )
 patch(
+    "model status indicator",
+    '<span style="font-size:13px;color:color-mix(in srgb,var(--color-text) 55%,'
+    'transparent)">{{ asOfLabel }}</span>',
+    '<span style="font-size:13px;color:color-mix(in srgb,var(--color-text) 55%,'
+    'transparent)">{{ asOfLabel }}</span>\n'
+    '      <span title="{{ modelDetail }}" style="display:flex;align-items:center;'
+    'gap:7px;font-size:12.5px;color:{{ modelColor }}">'
+    '<span style="width:8px;height:8px;background:{{ modelColor }};display:block">'
+    '</span>{{ modelLabel }}</span>',
+)
+
+patch(
     "findings intro",
     "Nineteen things across six contracts. Four of them are about wording that isn't "
     "in the document at all — the kind of gap a folder of PDFs will never show you.",
@@ -187,18 +262,6 @@ patch(
     "security file label",
     "tessellate-msa-2026.pdf · 11 pages · received 18 Apr 2026",
     "{{ secFileLabel }}",
-)
-patch(
-    "upload last-doc label",
-    "tessellate-msa-2026.pdf · 11 pages · 18 Apr 2026",
-    "{{ lastUploadLabel }}",
-)
-patch(
-    "upload alert body",
-    "Three pieces of hidden text in this document were trying to tell our reader "
-    "what to conclude. We kept it out of your schedule and flagged it for Nina "
-    "Boateng in Legal.",
-    "{{ uploadAlertBody }}",
 )
 patch(
     "chain headline",
@@ -247,12 +310,15 @@ patch(
     "drawerFinding:null, openOb:null, win:'90', sev:'all', "
     "role:'finance', exitDate:'2027-03-31', "
     "loaded:false, err:null, uploading:false, uploadMsg:'', exitCost:null, "
-    "askQuestion:'', asking:false, askResult:null, calendar:null };",
+    "askQuestion:'', asking:false, askResult:null, calendar:null, "
+    "askActivity:[], askPlan2:[], askPhase:'', askElapsed:'', "
+    "upFiles:[], upLog:[], upChanges:null, upText:'', upSpans:[], "
+    "upRead:null, upActive:null, upPhase:'', health:null };",
 )
 patch(
     "fetch on mount",
     "componentDidMount() { this.scrollToSel(); }",
-    "componentDidMount() { this.scrollToSel(); this.loadModel(); }",
+    "componentDidMount() { this.scrollToSel(); this.loadModel(); this.loadHealth(); /* Health is learned from real calls, so re-read it periodically. */ this._health = setInterval(this.loadHealth.bind(this), 20000); } componentWillUnmount() { if (this._health) clearInterval(this._health); }",
 )
 patch(
     "exit refetch when the date or contract changes",
@@ -282,14 +348,6 @@ patch(
 )
 
 # ── 6. real file upload ───────────────────────────────────────────────────
-patch(
-    "upload control",
-    '<button class="btn btn-primary" style="margin-top:22px">Choose a file</button>',
-    '<input type="file" onChange="{{ onPickFile }}" '
-    'style="margin-top:22px;font:inherit;display:block" />\n'
-    '              <div style="margin-top:12px;font-size:14px;'
-    'color:color-mix(in srgb,var(--color-text) 70%,transparent)">{{ uploadStatus }}</div>',
-)
 
 
 
@@ -319,6 +377,32 @@ ASK_VIEW = """
           </sc-for>
         </div>
 
+        <sc-if value="{{ askIsRunning }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:22px 32px 8px;border-top:1px solid var(--color-divider);background:var(--color-surface)">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+              <span style="width:9px;height:9px;background:var(--color-accent);display:block;animation:dcpulse 1s ease-in-out infinite"></span>
+              <span style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent-700);font-family:var(--font-heading);font-weight:800">{{ askPhase }}</span>
+              <span style="font-size:13px;color:color-mix(in srgb,var(--color-text) 50%,transparent);font-variant-numeric:tabular-nums">{{ askElapsed }}</span>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ askHasActivity }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:4px 32px 18px;background:var(--color-surface);border-bottom:1px solid var(--color-divider)">
+            <sc-for list="{{ askActivity }}" as="a" hint-placeholder-count="4">
+              <div style="display:grid;grid-template-columns:22px 1fr;gap:12px;padding:5px 0 5px {{ a.indent }};align-items:baseline">
+                <div style="font-size:12px;color:{{ a.color }};font-family:var(--font-heading);font-weight:800">{{ a.icon }}</div>
+                <div>
+                  <div style="font-size:14.5px;line-height:1.5;color:{{ a.color }}">{{ a.text }}<span style="color:color-mix(in srgb,var(--color-text) 45%,transparent);font-size:13px"> {{ a.detail }}</span></div>
+                  <sc-if value="{{ a.hasQuote }}" hint-placeholder-val="{{ false }}">
+                    <div style="border-left:2px solid var(--color-accent-200);padding:2px 0 2px 10px;margin-top:4px;font-size:13.5px;font-style:italic;color:color-mix(in srgb,var(--color-text) 72%,transparent)">&ldquo;{{ a.quote }}&rdquo;</div>
+                  </sc-if>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
         <sc-if value="{{ askHasPlan }}" hint-placeholder-val="{{ false }}">
           <div style="padding:24px 32px 4px;border-top:1px solid var(--color-divider)">
             <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:12px">How it worked it out</div>
@@ -343,7 +427,14 @@ ASK_VIEW = """
             <div style="font-size:13.5px;margin-top:14px;color:color-mix(in srgb,var(--color-text) 58%,transparent)">{{ askMeta }}</div>
           </div>
 
-          <sc-if value="{{ askUnanswerable }}" hint-placeholder-val="{{ false }}">
+          <sc-if value="{{ askDegraded }}" hint-placeholder-val="{{ false }}">
+          <div style="margin:20px 32px 4px;border:2px solid var(--color-accent);background:var(--color-accent-100);padding:20px 24px;max-width:900px">
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:17px;color:var(--color-accent-700);margin-bottom:6px">{{ degradedTitle }}</div>
+            <div style="font-size:15.5px;line-height:1.6">{{ degradedBody }}</div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ askUnanswerable }}" hint-placeholder-val="{{ false }}">
             <div style="margin:20px 32px 8px;border:2px solid var(--color-accent);background:var(--color-accent-100);padding:20px 24px;max-width:860px">
               <div style="font-family:var(--font-heading);font-weight:800;font-size:17px;color:var(--color-accent-700);margin-bottom:6px">We would be guessing</div>
               <div style="font-size:15.5px;line-height:1.6">{{ askMissing }}</div>
@@ -472,11 +563,118 @@ patch(
 )
 
 
+
+# ── 9. Upload: watch the document being read, and what it changed ─────────
+# The whole upload block is replaced rather than patched: the design showed a
+# static "what happens next" list, and this shows it actually happening.
+
+UPLOAD_VIEW = """<!-- ══════ UPLOAD ══════ -->
+    <sc-if value="{{ isUpload }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding:34px 32px 24px;border-bottom:2px solid var(--color-divider)">
+          <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:12px">Add a document</div>
+          <h2 style="margin:0 0 10px;font-size:32px">{{ uploadHeadline }}</h2>
+          <p style="margin:0 0 18px;font-size:16px;line-height:1.6;max-width:800px;color:color-mix(in srgb,var(--color-text) 75%,transparent)">{{ uploadSubhead }}</p>
+          <input type="file" multiple="true" onChange="{{ onPickFile }}" style="font:inherit;display:block" />
+          <div style="margin-top:10px;font-size:14px;color:color-mix(in srgb,var(--color-text) 65%,transparent)">{{ uploadStatus }}</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:minmax(420px,1.05fr) minmax(400px,1fr)">
+
+          <div style="border-right:2px solid var(--color-divider);min-width:0">
+            <sc-if value="{{ uploadHasFiles }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:18px 28px 6px">
+                <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:10px">Documents</div>
+                <sc-for list="{{ uploadFiles }}" as="f" hint-placeholder-count="2">
+                  <div onClick="{{ f.select }}" style="display:grid;grid-template-columns:18px 1fr auto;gap:12px;padding:9px 10px;margin:0 -10px;align-items:baseline;cursor:pointer;background:{{ f.bg }};border-left:3px solid {{ f.edge }}" style-hover="background:color-mix(in srgb, var(--color-text) 5%, transparent)">
+                    <span style="font-size:13px;color:{{ f.color }};font-family:var(--font-heading);font-weight:800">{{ f.icon }}</span>
+                    <span style="font-size:14.5px;color:{{ f.color }}">{{ f.name }}<span style="font-size:13px;color:color-mix(in srgb,var(--color-text) 48%,transparent)"> {{ f.meta }}</span></span>
+                    <span style="font-size:12.5px;font-variant-numeric:tabular-nums;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ f.badge }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <div style="padding:16px 28px 8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ readerTitle }}</div>
+              <div style="flex:1;min-width:80px;height:3px;background:color-mix(in srgb,var(--color-text) 12%,transparent)">
+                <div style="height:3px;background:var(--color-accent);width:{{ readerProgress }}"></div>
+              </div>
+              <div style="font-size:12.5px;font-variant-numeric:tabular-nums;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ readerCaption }}</div>
+            </div>
+
+            <div ref="{{ readerRef }}" style="margin:0 28px 26px;padding:18px 20px;border:1px solid var(--color-divider);background:var(--color-surface);height:420px;overflow:auto;font-size:13.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word">
+              <sc-for list="{{ readerSegs }}" as="s" hint-placeholder-count="3">
+                <span data-seg-active="{{ s.active }}" style="{{ s.style }}">{{ s.text }}</span>
+              </sc-for>
+              <sc-if value="{{ readerEmpty }}" hint-placeholder-val="{{ true }}">
+                <span style="color:color-mix(in srgb,var(--color-text) 45%,transparent)">Choose a file and the document appears here, with the wording highlighted as it is found.</span>
+              </sc-if>
+            </div>
+          </div>
+
+          <div style="min-width:0">
+            <sc-if value="{{ uploadHasChanges }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:18px 28px 4px">
+                <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent-700);font-family:var(--font-heading);font-weight:800;margin-bottom:12px">What changed here</div>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px 18px">
+                  <sc-for list="{{ uploadChanges }}" as="c" hint-placeholder-count="4">
+                    <div style="display:flex;align-items:baseline;gap:9px">
+                      <span style="font-family:var(--font-heading);font-weight:800;font-size:22px;color:{{ c.color }};font-variant-numeric:tabular-nums">{{ c.delta }}</span>
+                      <span style="font-size:14px;line-height:1.4">{{ c.label }}<span style="color:color-mix(in srgb,var(--color-text) 45%,transparent);font-size:12.5px"> {{ c.total }}</span></span>
+                    </div>
+                  </sc-for>
+                </div>
+                <button onClick="{{ goDeadlines }}" class="btn btn-secondary" style="margin-top:16px">See the dates it added</button>
+              </div>
+            </sc-if>
+
+            <div style="padding:18px 28px 8px">
+              <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ uploadLogTitle }}</div>
+            </div>
+            <div style="margin:0 28px 26px;height:{{ logHeight }};overflow:auto">
+              <sc-for list="{{ uploadLog }}" as="l" hint-placeholder-count="6">
+                <div style="display:grid;grid-template-columns:20px 1fr;gap:10px;padding:4px 0 4px {{ l.indent }};align-items:baseline">
+                  <span style="font-size:12px;color:{{ l.color }};font-family:var(--font-heading);font-weight:800">{{ l.icon }}</span>
+                  <div>
+                    <div style="font-size:14px;line-height:1.45;color:{{ l.color }}">{{ l.text }}<span style="color:color-mix(in srgb,var(--color-text) 45%,transparent);font-size:12.5px"> {{ l.detail }}</span></div>
+                    <sc-if value="{{ l.hasQuote }}" hint-placeholder-val="{{ false }}">
+                      <div style="border-left:2px solid var(--color-accent-200);padding:1px 0 1px 9px;margin-top:3px;font-size:13px;font-style:italic;color:color-mix(in srgb,var(--color-text) 68%,transparent)">&ldquo;{{ l.quote }}&rdquo;</div>
+                    </sc-if>
+                  </div>
+                </div>
+              </sc-for>
+              <sc-if value="{{ uploadLogEmpty }}" hint-placeholder-val="{{ true }}">
+                <sc-for list="{{ pipelineSteps }}" as="p" hint-placeholder-count="5">
+                  <div style="display:grid;grid-template-columns:30px 1fr;gap:12px;padding:11px 0;border-top:1px solid var(--color-divider)">
+                    <div style="font-family:var(--font-heading);font-weight:800;font-size:13px;color:color-mix(in srgb,var(--color-text) 40%,transparent)">{{ p.n }}</div>
+                    <div>
+                      <div style="font-family:var(--font-heading);font-weight:800;font-size:14.5px;margin-bottom:2px">{{ p.title }}</div>
+                      <div style="font-size:13.5px;line-height:1.5;color:color-mix(in srgb,var(--color-text) 68%,transparent)">{{ p.body }}</div>
+                    </div>
+                  </div>
+                </sc-for>
+              </sc-if>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+"""
+
+
+def replace_upload_view(text: str) -> str:
+    """Swap the whole upload block for the live one."""
+    start = text.index("<!-- ══════ UPLOAD ══════ -->")
+    end = text.index("<!-- ══════ CONTRACTS ══════ -->")
+    return text[:start] + UPLOAD_VIEW + "\n    " + text[end:]
+
+
 def main() -> int:
     if not SRC.exists():
         print(f"missing {SRC}")
         return 1
-    text = strip_mock(SRC.read_text())
+    text = replace_upload_view(strip_mock(SRC.read_text()))
     failures: list[str] = []
     for label, find, replace in patches:
         if find not in text:
@@ -578,22 +776,119 @@ LIVE_METHODS = """
   }
 
   runAsk(question) {
+    // Streams the agent's work as it happens rather than waiting for the
+    // answer. The tool calls and what they retrieved are the interesting part.
     const self = this;
     const q = (question || '').trim();
     if (!q || this.state.asking) return;
-    this.setState({ asking: true, askQuestion: q });
-    const body = new FormData();
-    body.append('question', q);
-    fetch(API + '/agent/ask', { method: 'POST', body: body })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-      .then(function (res) {
-        if (!res.ok) throw new Error(res.d.detail || 'ask failed');
-        self.setState({ asking: false, askResult: res.d });
-      })
-      .catch(function (err) {
-        self.setState({ asking: false, askResult: {
-          question: q, answer: 'Could not reach the analysis API: ' + err.message,
-          citations: [], sufficient: false, missing: '', considered: 0 } });
+    if (this._es) { this._es.close(); this._es = null; }
+    if (this._tick) { clearInterval(this._tick); }
+
+    const started = Date.now();
+    this.setState({
+      asking: true, askQuestion: q, askResult: null,
+      askActivity: [], askPlan2: [], askPhase: 'Planning', askElapsed: '0.0s',
+    });
+    this._tick = setInterval(function () {
+      if (!self.state.asking) return;
+      self.setState({ askElapsed: ((Date.now() - started) / 1000).toFixed(1) + 's' });
+    }, 100);
+
+    const push = function (row) {
+      self.setState({ askActivity: (self.state.askActivity || []).concat([row]) });
+    };
+    const stop = function () {
+      if (self._es) { self._es.close(); self._es = null; }
+      if (self._tick) { clearInterval(self._tick); self._tick = null; }
+      self.setState({ asking: false });
+    };
+
+    const es = new EventSource(API + '/agent/stream?question=' + encodeURIComponent(q));
+    this._es = es;
+
+    es.onmessage = function (message) {
+      let e;
+      try { e = JSON.parse(message.data); } catch (err) { return; }
+
+      if (e.type === 'planning') {
+        self.setState({ askPhase: 'Working out how to answer' });
+      } else if (e.type === 'plan') {
+        self.setState({ askPhase: 'Looking things up', askPlan2: e.steps || [] });
+        (e.steps || []).forEach(function (step, i) {
+          push({ icon: String(i + 1).padStart(2, '0'), text: step, detail: '',
+                 quote: '', hasQuote: false, indent: '0px',
+                 color: 'color-mix(in srgb,var(--color-text) 60%,transparent)' });
+        });
+      } else if (e.type === 'thinking') {
+        self.setState({ askPhase: 'Deciding what to look up next' });
+      } else if (e.type === 'throttled') {
+        self.setState({ askPhase: 'Waiting ' + e.seconds + 's for the rate limit' });
+        push({ icon: '~', text: 'Rate limit reached',
+               detail: 'waiting ' + e.seconds + 's — free tier is 8,000 tokens a minute',
+               quote: '', hasQuote: false, indent: '0px',
+               color: 'var(--color-accent-700)' });
+      } else if (e.type === 'tool_start') {
+        self.setState({ askPhase: 'Running ' + e.tool });
+        const args = Object.keys(e.args || {})
+          .map(function (k) { return k + '=' + JSON.stringify(e.args[k]); })
+          .join(' ');
+        push({ icon: '\u2192', text: e.tool, detail: args, quote: '',
+               hasQuote: false, indent: '0px', color: 'var(--color-text)' });
+      } else if (e.type === 'tool_end') {
+        push({ icon: '\u2713', text: e.summary || 'done', detail: '',
+               quote: '', hasQuote: false, indent: '22px',
+               color: e.ok ? 'var(--color-accent-700)' : 'var(--color-accent)' });
+        (e.retrieved || []).forEach(function (r) {
+          push({ icon: '\u00b7',
+                 text: (r.contract ? r.contract + ' — ' : '') + (r.title || ''),
+                 detail: '', quote: r.quote || '', hasQuote: !!r.quote,
+                 indent: '22px',
+                 color: 'color-mix(in srgb,var(--color-text) 70%,transparent)' });
+        });
+      } else if (e.type === 'answer') {
+        self.setState({
+          askPhase: 'Done',
+          askResult: { question: q, answer: e.answer, citations: e.citations || [],
+                       sufficient: e.sufficient, missing: '',
+                       plan: self.state.askPlan2 || [],
+                       steps: [], tables: e.tables || [] },
+        });
+      } else if (e.type === 'exhausted') {
+        push({ icon: '!', text: 'Ran out of lookups', detail: '', quote: '',
+               hasQuote: false, indent: '0px', color: 'var(--color-accent)' });
+      } else if (e.type === 'error') {
+        self.setState({ askResult: { question: q, answer: e.message, citations: [],
+                                     sufficient: false, missing: '', plan: [],
+                                     steps: [], tables: [] } });
+        stop();
+      } else if (e.type === 'degraded') {
+        self.setState({ askResult: { question: q, answer: e.answer,
+          citations: e.citations || [], sufficient: false, missing: e.missing || '',
+          plan: [], steps: [], tables: [], degraded: true },
+          health: e.model || self.state.health });
+      } else if (e.type === 'done') {
+        self.loadHealth();
+        stop();
+      }
+    };
+    es.onerror = function () {
+      if (!self.state.askResult) {
+        self.setState({ askResult: { question: q,
+          answer: 'Lost the connection to the analysis API.', citations: [],
+          sufficient: false, missing: '', plan: [], steps: [], tables: [] } });
+      }
+      stop();
+    };
+  }
+
+  loadHealth() {
+    const self = this;
+    fetch(API + '/health/model')
+      .then(function (r) { return r.json(); })
+      .then(function (h) { self.setState({ health: h }); })
+      .catch(function () {
+        self.setState({ health: { status: 'error', usable: false,
+          message: 'Cannot reach the analysis API.' } });
       });
   }
 
@@ -608,27 +903,193 @@ LIVE_METHODS = """
 
   onPickFile(e) {
     const self = this;
-    const file = e && e.target && e.target.files && e.target.files[0];
-    if (!file) return;
-    this.setState({ uploading: true, uploadMsg: 'Reading ' + file.name + '…' });
+    const files = e && e.target && e.target.files;
+    if (!files || !files.length) return;
+
     const body = new FormData();
-    body.append('files', file);
-    body.append('title', file.name);
-    body.append('counterparty', file.name.replace(/[-_.].*$/, ''));
+    for (let i = 0; i < files.length; i++) body.append('files', files[i]);
     body.append('our_role', 'buyer');
-    fetch(API + '/contracts', { method: 'POST', body: body })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-      .then(function (res) {
-        if (!res.ok) throw new Error(res.d.detail || 'upload failed');
-        self.setState({ uploading: false,
-                        uploadMsg: 'Analysed ' + file.name + '. ' +
-                                   res.d.clauses.length + ' clauses, ' +
-                                   res.d.findings.length + ' findings.' });
-        self.loadModel();
+
+    this.setState({
+      uploading: true, uploadMsg: 'Reading ' + files.length + ' document(s)…',
+      upFiles: [], upLog: [], upChanges: null, upText: '', upSpans: [],
+      upRead: null, upActive: null, upPhase: 'Reading',
+    });
+
+    // Events are replayed on a short timer rather than applied the instant
+    // they arrive. A cached document analyses in under a second, and a reader
+    // who sees nothing happen learns nothing about what happened.
+    const pending = [];
+    let draining = false;
+    const drain = function () {
+      if (!pending.length) { draining = false; return; }
+      draining = true;
+      self.applyUploadEvent(pending.shift());
+      setTimeout(drain, pending.length > 60 ? 8 : 55);
+    };
+    const queue = function (event) {
+      pending.push(event);
+      if (!draining) drain();
+    };
+
+    fetch(API + '/contracts/stream', { method: 'POST', body: body })
+      .then(function (response) {
+        if (!response.ok || !response.body) throw new Error('upload failed');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const pump = function () {
+          return reader.read().then(function (chunk) {
+            if (chunk.done) return;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            const lines = buffer.split('\\n');
+            buffer = lines.pop();
+            lines.forEach(function (line) {
+              if (!line.indexOf('data: ')) {
+                try { queue(JSON.parse(line.slice(6))); } catch (err) {}
+              }
+            });
+            return pump();
+          });
+        };
+        return pump();
       })
       .catch(function (err) {
-        self.setState({ uploading: false, uploadMsg: 'Could not analyse: ' + err.message });
+        self.setState({ uploading: false,
+                        uploadMsg: 'Could not analyse: ' + err.message });
       });
+  }
+
+  applyUploadEvent(ev) {
+    const st = this.state;
+    const log = function (self, row) {
+      self.setState({ upLog: (self.state.upLog || []).concat([row]) });
+    };
+
+    if (ev.type === 'file_start') {
+      const files = (st.upFiles || []).concat([{
+        name: ev.filename, status: 'reading', clauses: 0, findings: 0,
+        deadlines: 0, changes: null, contract_id: null }]);
+      this.setState({ upFiles: files, upActive: files.length - 1,
+                      upText: '', upSpans: [], upRead: null,
+                      upPhase: 'Reading ' + ev.filename });
+      log(this, { icon: '\u25b8', text: ev.filename,
+                  detail: 'file ' + (ev.index + 1) + ' of ' + ev.total,
+                  color: 'var(--color-text)', indent: '0px', hasQuote: false });
+
+    } else if (ev.type === 'ingested') {
+      this.setState({ upText: ev.text });
+      log(this, { icon: '\u00b7', text: 'Read the text',
+                  detail: ev.chars.toLocaleString() + ' characters, ' +
+                          ev.pages + ' page(s)' + (ev.used_ocr ? ', via OCR' : ''),
+                  color: 'color-mix(in srgb,var(--color-text) 70%,transparent)',
+                  indent: '20px', hasQuote: false });
+
+    } else if (ev.type === 'firewall') {
+      const bad = ev.quarantined;
+      log(this, { icon: bad ? '!' : '\u00b7',
+                  text: bad ? 'Hidden instructions found — held back'
+                            : 'Checked for tampering',
+                  detail: bad ? ev.indicators.length + ' payload(s)' : 'clean',
+                  color: bad ? 'var(--color-accent)'
+                             : 'color-mix(in srgb,var(--color-text) 70%,transparent)',
+                  indent: '20px', hasQuote: false });
+
+    } else if (ev.type === 'reading') {
+      this.setState({ upRead: { start: ev.start, end: ev.end },
+                      upPhase: 'Reading part ' + ev.chunk + ' of ' + ev.chunks });
+
+    } else if (ev.type === 'throttled') {
+      this.setState({ upPhase: 'Waiting ' + ev.seconds + 's for the rate limit' });
+      log(this, { icon: '~', text: 'Rate limit reached',
+                  detail: 'waiting ' + ev.seconds + 's — the free tier allows '
+                          + '8,000 tokens a minute',
+                  color: 'var(--color-accent-700)', indent: '20px',
+                  hasQuote: false });
+
+    } else if (ev.type === 'clause') {
+      this.setState({ upSpans: (st.upSpans || []).concat([
+        { start: ev.start, end: ev.end }]) });
+      const files = (st.upFiles || []).slice();
+      if (st.upActive != null && files[st.upActive]) {
+        files[st.upActive].clauses += 1;
+        this.setState({ upFiles: files });
+      }
+      log(this, { icon: '\u00b7',
+                  text: ev.clause_type.replace(/_/g, ' '),
+                  detail: 'characters ' + ev.start + '\u2013' + ev.end,
+                  quote: ev.quote, hasQuote: true, indent: '20px',
+                  color: 'color-mix(in srgb,var(--color-text) 78%,transparent)' });
+
+    } else if (ev.type === 'verified') {
+      log(this, { icon: '\u2713', text: 'Every quote checked against the document',
+                  detail: ev.kept + ' kept, ' + ev.discarded + ' discarded',
+                  color: 'var(--color-accent-700)', indent: '20px',
+                  hasQuote: false });
+
+    } else if (ev.type === 'deadline') {
+      const files = (st.upFiles || []).slice();
+      if (st.upActive != null && files[st.upActive]) {
+        files[st.upActive].deadlines += 1;
+        this.setState({ upFiles: files });
+      }
+      log(this, { icon: '\u2192', text: 'Added ' + ev.due + ' to the calendar',
+                  detail: ev.kind + ', ' + ev.days + ' days away',
+                  color: 'var(--color-accent-700)', indent: '20px',
+                  hasQuote: false });
+
+    } else if (ev.type === 'finding') {
+      const files = (st.upFiles || []).slice();
+      if (st.upActive != null && files[st.upActive]) {
+        files[st.upActive].findings += 1;
+        this.setState({ upFiles: files });
+      }
+      log(this, { icon: ev.evidenced ? '\u00b7' : '\u2205', text: ev.title,
+                  detail: ev.severity + (ev.evidenced ? '' : ' · nothing to quote'),
+                  color: (ev.severity === 'critical' || ev.severity === 'high')
+                         ? 'var(--color-accent)'
+                         : 'color-mix(in srgb,var(--color-text) 70%,transparent)',
+                  indent: '20px', hasQuote: false });
+
+    } else if (ev.type === 'changes') {
+      const files = (st.upFiles || []).slice();
+      if (st.upActive != null && files[st.upActive]) {
+        files[st.upActive].changes = ev;
+        files[st.upActive].contract_id = ev.contract_id;
+        files[st.upActive].status = 'done';
+      }
+      this.setState({ upFiles: files, upChanges: ev });
+
+    } else if (ev.type === 'file_error') {
+      const files = (st.upFiles || []).slice();
+      if (st.upActive != null && files[st.upActive]) files[st.upActive].status = 'error';
+      this.setState({ upFiles: files });
+      log(this, { icon: '!', text: 'Could not analyse ' + ev.filename,
+                  detail: ev.message, color: 'var(--color-accent)',
+                  indent: '0px', hasQuote: false });
+
+    } else if (ev.type === 'all_done') {
+      this.setState({ uploading: false, upRead: null, upPhase: 'Done',
+                      uploadMsg: 'Analysed. ' + ev.contracts +
+                                 ' contracts, ' + ev.gaps + ' flow-down gaps.' });
+      this.loadModel();
+      this.setState({ calendar: null });
+
+    } else if (ev.type === 'error') {
+      this.setState({ uploading: false, uploadMsg: ev.message });
+    }
+  }
+
+  scrollReader() {
+    const pane = this.readerEl;
+    if (!pane) return;
+    const el = pane.querySelector('[data-seg-active="1"]');
+    if (el) pane.scrollTop = Math.max(0, el.offsetTop - pane.clientHeight / 3);
+  }
+
+  selectUploaded(index) {
+    const file = (this.state.upFiles || [])[index];
+    this.setState({ upActive: index, upChanges: file ? file.changes : null });
   }
 """
 
@@ -643,8 +1104,19 @@ RENDER_PRELUDE = """    // ── WIRED: nothing renders until the API has answe
                riskAxes: [], detailClauses: [], detailFindings: [], detailTabs: [],
                docSegs: [], exitLines: [], pipelineSteps: [], uploadChecks: [],
                isAsk: false, askHasAnswer: false, askCitations: [],
+               askIsRunning: false, askHasActivity: false, askActivity: [],
+               askPhase: '', askElapsed: '', askDegraded: false,
+               degradedTitle: '', degradedBody: '',
+               modelLabel: 'Model idle', modelColor: 'transparent',
+               modelDetail: '',
                askSuggestions: [], askQuestion: '', askButtonLabel: 'Ask',
                askHasPlan: false, askPlan: [], askSteps: [],
+               uploadHasFiles: false, uploadFiles: [], readerSegs: [],
+               readerEmpty: true, uploadHasChanges: false, uploadChanges: [],
+               uploadLog: [], uploadLogEmpty: true, logHeight: 'auto',
+               readerTitle: '', readerCaption: '', readerProgress: '0%',
+               uploadHeadline: 'Add a document', uploadSubhead: '',
+               uploadLogTitle: '',
                isCalendar: false, calendarMonths: [], calActionable: '—',
                calDocuments: '—', calComputed: '—', calWritten: '—',
                asOfLabel: this.state.err ? 'Cannot reach the analysis API' : 'Loading…',
@@ -694,8 +1166,90 @@ EXTRA_VALS = """      // ── WIRED: values that used to be written into the d
         : 'You promised your customers more than your suppliers promised you',
       chainSubhead: (STATS.gaps || 0) + ' differences across ' + (STATS.contracts || 0) +
         ' contracts, read together. Every figure below is quoted from one of them; the differences are arithmetic.',
-      uploadStatus: this.state.uploadMsg || '',
+      // ── WIRED: upload, watched as it happens
+      uploadStatus: st.uploadMsg || '',
       onPickFile: this.onPickFile.bind(this),
+      uploadHeadline: st.uploading ? st.upPhase || 'Reading'
+        : (st.upFiles && st.upFiles.length ? 'Here is what changed'
+           : 'Add a document'),
+      uploadSubhead: st.uploading
+        ? 'Watch the wording being found. Nothing reaches your calendar until it has been checked against the document.'
+        : (st.upFiles && st.upFiles.length
+           ? 'Pick a document on the left to see what it added.'
+           : 'Drop in one file or several. Each becomes its own contract, and you can watch it being read.'),
+      goDeadlines: function () { self.setState({ view: 'deadlines' }); },
+
+      uploadHasFiles: !!(st.upFiles && st.upFiles.length),
+      uploadFiles: (st.upFiles || []).map(function (f, i) {
+        const active = st.upActive === i;
+        const icon = f.status === 'done' ? '\u2713'
+                   : (f.status === 'error' ? '!' : '\u25b8');
+        return {
+          name: f.name,
+          meta: f.status === 'reading' ? ' · reading' : '',
+          icon: icon,
+          badge: f.status === 'done'
+            ? f.clauses + ' clauses · ' + f.deadlines + ' dates' : '',
+          color: f.status === 'error' ? 'var(--color-accent)' : 'var(--color-text)',
+          bg: active ? 'color-mix(in srgb, var(--color-text) 6%, transparent)'
+                     : 'transparent',
+          edge: active ? 'var(--color-accent)' : 'transparent',
+          select: function () { self.selectUploaded(i); },
+        };
+      }),
+
+      readerTitle: st.uploading ? 'Reading' : 'The document',
+      readerCaption: st.upRead
+        ? 'characters ' + st.upRead.start + '\u2013' + st.upRead.end
+        : ((st.upSpans || []).length ? (st.upSpans || []).length + ' passages found' : ''),
+      readerProgress: (function () {
+        const len = (st.upText || '').length;
+        if (!len || !st.upRead) return st.upText ? '100%' : '0%';
+        return Math.min(100, Math.round(st.upRead.end / len * 100)) + '%';
+      })(),
+      readerEmpty: !(st.upText || '').length,
+      readerRef: function (el) { self.readerEl = el; },
+      readerSegs: buildReaderSegs(st),
+
+      uploadHasChanges: !!st.upChanges,
+      uploadChanges: st.upChanges ? CHANGE_ROWS.map(function (row) {
+        const d = (st.upChanges.delta || {})[row.key] || 0;
+        return {
+          label: row.label,
+          delta: (d > 0 ? '+' : '') + d,
+          total: '(' + ((st.upChanges.totals || {})[row.key] || 0) + ' in all)',
+          color: d > 0 ? 'var(--color-accent)'
+                       : 'color-mix(in srgb,var(--color-text) 40%,transparent)',
+        };
+      }) : [],
+
+      uploadLogTitle: st.uploading ? 'What it is doing'
+                                   : ((st.upLog || []).length ? 'What it did'
+                                      : 'What happens when you add one'),
+      uploadLog: st.upLog || [],
+      uploadLogEmpty: !((st.upLog || []).length),
+      logHeight: (st.upLog || []).length ? '420px' : 'auto',
+
+      // ── WIRED: model health
+      modelLabel: MODEL_LABEL(st),
+      modelColor: MODEL_COLOR(st),
+      modelDetail: ((st.health && (st.health.detail || st.health.message)) || ''),
+      askDegraded: !!(st.askResult && st.askResult.degraded),
+      degradedTitle: (st.health && st.health.status === 'rate_limited')
+        ? 'The model is rate limited' : 'The model did not load',
+      degradedBody: (function () {
+        const h = st.health || {};
+        const wait = h.retry_after ? ' Try again in about '
+                     + Math.round(h.retry_after) + ' seconds.' : '';
+        const why = h.status === 'no_key'
+          ? 'No model is connected, so nothing can be summarised.'
+          : (h.status === 'rate_limited'
+             ? 'The free tier allows 8,000 tokens a minute and that has been used up.'
+             : 'The model is not responding right now.');
+        return why + ' What you can see below is a plain word match over the '
+             + 'verified records — nothing has been read or summarised, and every '
+             + 'passage is quoted from your documents.' + wait;
+      })(),
 
       // ── WIRED: Calendar
       isCalendar: st.view === 'calendar',
@@ -746,6 +1300,11 @@ EXTRA_VALS = """      // ── WIRED: values that used to be written into the d
       askSuggestions: ASK_SUGGESTIONS.map(function (q) {
         return { label: q, go: function () { self.runAsk(q); } };
       }),
+      askIsRunning: !!st.asking,
+      askPhase: st.askPhase || 'Working',
+      askElapsed: st.askElapsed || '',
+      askHasActivity: !!(st.askActivity && st.askActivity.length),
+      askActivity: st.askActivity || [],
       askHasPlan: !!(st.askResult && st.askResult.plan && st.askResult.plan.length),
       askPlan: ((st.askResult && st.askResult.plan) || []).map(function (t, i) {
         return { n: String(i + 1).padStart(2, '0'), text: t };

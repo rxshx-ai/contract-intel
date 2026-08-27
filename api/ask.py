@@ -433,6 +433,38 @@ def infer_contract(question: str, retriever) -> str | None:
     return matched.pop() if len(matched) == 1 else None
 
 
+def keyword_answer(question: str, retriever, contract_id: str | None = None,
+                   reason: str = "") -> Answer:
+    """What we can say without the model: the matching passages, unsynthesised.
+
+    Retrieval does not need the model -- BM25 and the stored vectors are local.
+    So a model outage costs the user the SUMMARY, not the search. Returning the
+    matches with an honest banner is more useful than an error, and it cannot
+    be mistaken for an answer because nothing has been written.
+    """
+    contract_id = contract_id or infer_contract(question, retriever)
+    hits = retriever.search(question, k=TOP_K, contract_id=contract_id)
+    citations = [hit.citation() for hit in hits][:6]
+
+    if not citations:
+        text = ("The model is unavailable, and nothing in the contracts matches "
+                "those words either.")
+    else:
+        where = ", ".join(sorted({c.get("contract") or "" for c in citations
+                                  if c.get("contract")})[:3])
+        text = (f"The model is unavailable, so this has not been read or "
+                f"summarised. These {len(citations)} passages match your words"
+                + (f", from {where}" if where else "") + ". "
+                f"Every one is quoted from your documents.")
+
+    return Answer(
+        question=question, answer=text, citations=citations,
+        sufficient=False,
+        missing=reason or "the model is not answering right now",
+        considered=len(hits),
+    )
+
+
 def ask(
     question: str,
     retriever,

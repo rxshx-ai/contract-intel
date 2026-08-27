@@ -188,6 +188,54 @@ three bad rows is more credible than one with none.
 | PII/pricing redaction before egress | **Not implemented** — design only |
 | Per-tenant encryption keys | **Not implemented** — design only |
 
+## Watching it work
+
+Both the agent and an upload stream their progress (Server-Sent Events), so the
+interesting part — the tool calls, and what each one retrieved — is visible as
+it happens rather than after.
+
+| Endpoint | Streams |
+|---|---|
+| `GET /agent/stream?question=…` | plan, each tool call, what it retrieved, throttle waits, answer |
+| `POST /contracts/stream` | document text, where in it the model is reading, every clause with offsets, deadlines derived, and a delta of what changed in the interface |
+
+Both share the blocking code path (`on_event` callbacks), so the events cannot
+drift from what actually ran.
+
+The upload view shows the document on the left with the passage being read
+highlighted, and on the right a running log plus a change summary — *"+20
+clauses, +5 dates to act on, +9 calendar entries"* — computed as a before/after
+delta rather than asserted. A bulk upload becomes a clickable list; selecting a
+document shows what that file added.
+
+Events are replayed on a short timer rather than applied the instant they
+arrive: a cached document analyses in under a second, and a reader who sees
+nothing happen learns nothing about what happened.
+
+## Model health and degradation
+
+`GET /health/model`, and a status pill in the header.
+
+Health is learned from **real calls**, not a synthetic ping — a probe that
+succeeds tells you nothing about whether the next request will be rate limited.
+
+When the model is unavailable, `/ask` and `/agent/ask` do not fail. Retrieval is
+local and unaffected, so they fall back to a **keyword answer**: the matching
+passages, unsynthesised, with an honest banner.
+
+> The model is unavailable, so this has not been read or summarised. These 6
+> passages match your words, from Northwind Observability, Acme Financial Group…
+
+The user loses the summary, not the search — and because nothing was written,
+it cannot be mistaken for an answer. Rate limits report the retry window.
+
+| Status | Meaning |
+|---|---|
+| `ok` | last real call succeeded |
+| `rate_limited` | tier limit hit; retry window reported |
+| `error` | not responding (auth, network, provider) |
+| `no_key` | no `GROQ_API_KEY` |
+
 ## Ask and the agent
 
 Retrieval *finds*; these *answer*. Both run over the same hybrid retriever, so

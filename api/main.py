@@ -16,13 +16,14 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import (FileResponse, PlainTextResponse,
+                               StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 
 from api import demo
 from api.store import Store, is_postgres
 from api.vectors import VectorIndex
-from api.llm import MODEL as llm_model_name, ExtractionUnavailable
+from api.llm import HEALTH, MODEL as llm_model_name, ExtractionUnavailable
 from api.findings.backtoback import exposure_summary
 from api.findings.termination import termination_cost
 from api.ingest import ingest_pdf, ingest_text
@@ -234,6 +235,145 @@ async def create_contract(
 # --------------------------------------------------------------------------
 # contract views
 # --------------------------------------------------------------------------
+
+@app.post("/contracts/stream")
+async def create_contract_stream(
+    files: list[UploadFile] = File(...),
+    our_role: str = Form("buyer"),
+    our_party: str = Form(demo.OUR_PARTY),
+):
+    """Analyse uploads, reporting every stage as it happens.
+
+    One contract per file, so a bulk upload becomes a list the user can click
+    through. Each file reports: the text it read, where in that text the model
+    is working, every clause found with its offsets, the deadlines derived, and
+    finally what changed in the interface as a result.
+    """
+    import queue
+    import threading
+
+    spooled = []
+    for upload in files:
+        raw = await upload.read()
+        spooled.append((upload.filename or "upload.txt", raw))
+    if not spooled:
+        raise HTTPException(status_code=400, detail="no files")
+
+    events: "queue.Queue[dict | None]" = queue.Queue()
+    today = _today()
+
+    def work():
+        try:
+            for index, (name, raw) in enumerate(spooled):
+                _analyse_one(name, raw, index, len(spooled), our_role,
+                             our_party, today, events.put)
+            _refresh_portfolio()
+            events.put({"type": "all_done", "contracts": len(_state["bundles"]),
+                        "gaps": len(_state["gaps"])})
+        except Exception as exc:                       # noqa: BLE001
+            events.put({"type": "error", "message": str(exc)[:300]})
+        finally:
+            events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def emit():
+        while True:
+            event = events.get()
+            if event is None:
+                break
+            yield f"data: {json.dumps(event)}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        emit(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _analyse_one(name, raw, index, total, our_role, our_party, today, emit):
+    """Ingest and analyse one file, emitting progress and a change summary."""
+    from api.calendar import build_calendar
+
+    emit({"type": "file_start", "index": index, "total": total, "filename": name})
+
+    tmp_path = None
+    try:
+        if name.lower().endswith(".pdf"):
+            tmp_path = _spill(raw)
+            doc = ingest_pdf(tmp_path, name)
+        else:
+            doc = ingest_text(raw.decode("utf-8", errors="replace"), name)
+
+        # The text goes to the client so it can show the document being read.
+        emit({"type": "ingested", "doc_id": doc.id, "filename": doc.filename,
+              "chars": len(doc.text), "pages": len(doc.pages),
+              "used_ocr": doc.used_ocr, "contract_type": doc.contract_type.value,
+              "text": doc.text})
+
+        before = _interface_counts(today)
+        contract_id = f"k_{doc.sha256[:8]}"
+        bundle = analyze_contract(
+            [doc], title=name, counterparty=_counterparty_from(name),
+            our_role=OurRole(our_role), our_party=our_party, today=today,
+            contract_id=contract_id,
+            doc_paths={doc.id: tmp_path} if tmp_path else None,
+            on_event=emit)
+
+        _state["bundles"] = [b for b in _state["bundles"]
+                             if b.contract.id != bundle.contract.id] + [bundle]
+        _refresh_portfolio()
+        persist(bundle)
+        _store.audit(ACTOR, "analyze", bundle.contract.id, name)
+
+        after = _interface_counts(today)
+        emit({"type": "changes", "filename": name,
+              "contract_id": bundle.contract.id,
+              "counterparty": bundle.contract.counterparty,
+              "risk": (bundle.result().risk.overall if bundle.result().risk else 0),
+              "delta": {k: after[k] - before[k] for k in after},
+              "totals": after})
+        emit({"type": "file_done", "index": index, "filename": name,
+              "contract_id": bundle.contract.id,
+              "clauses": len(bundle.claims), "findings": len(bundle.findings),
+              "deadlines": len(bundle.obligations),
+              "grounding": round(bundle.grounding_rate, 4)})
+    except ExtractionUnavailable as exc:
+        emit({"type": "file_error", "filename": name,
+              "message": f"Extraction unavailable: {exc}"})
+    except Exception as exc:                           # noqa: BLE001
+        emit({"type": "file_error", "filename": name, "message": str(exc)[:240]})
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+def _interface_counts(today: date) -> dict[str, int]:
+    """What the interface currently shows, so a change can be reported as a
+    delta rather than as a claim."""
+    from api.calendar import build_calendar
+
+    bundles = _state["bundles"]
+    events = build_calendar(bundles, today)
+    return {
+        "contracts": len(bundles),
+        "clauses": sum(len(b.claims) for b in bundles),
+        "findings": sum(len(b.findings) for b in bundles),
+        "deadlines": sum(len(b.obligations) for b in bundles),
+        "calendar_events": len(events),
+        "actionable_dates": sum(1 for e in events if e.actionable),
+        "flow_down_gaps": len(_state["gaps"]),
+    }
+
+
+def _counterparty_from(filename: str) -> str:
+    stem = filename.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    words = [w for w in stem.replace("_", " ").replace("-", " ").split()
+             if not w.isdigit()]
+    return " ".join(w.capitalize() for w in words[:4]) or stem
+
 
 @app.get("/contracts")
 def list_contracts():
@@ -454,11 +594,18 @@ def delete_contract(contract_id: str):
     return {"deleted": contract_id, "remaining": len(_state["bundles"])}
 
 
+@app.get("/health/model")
+def model_health():
+    """Whether the model is answering, learned from real calls."""
+    return HEALTH.snapshot()
+
+
 @app.get("/system")
 def system_info():
     """What this process is actually backed by."""
     return {
         "database": "postgres" if is_postgres() else "sqlite",
+        "model": HEALTH.snapshot(),
         "vectors": _vectors.stats(),
         "contracts": len(_state["bundles"]),
         "restored_from_storage": bool(_state.get("restored")),
@@ -489,16 +636,77 @@ def agent_ask(question: str = Form(...), max_steps: int = Form(5)):
     question = (question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="question is required")
-    agent = Agent(_state["bundles"], _state["gaps"], _retriever(), _today())
+    from api.ask import keyword_answer
+
+    retriever = _retriever()
+    agent = Agent(_state["bundles"], _state["gaps"], retriever, _today())
     try:
         result = agent.run(question, max_steps=max(2, min(6, max_steps)))
-    except ExtractionUnavailable as exc:
-        raise HTTPException(status_code=503, detail=f"Agent unavailable: {exc}")
-    except Exception as exc:
-        raise HTTPException(status_code=502,
-                            detail=f"Agent failed against {llm_model()}: {exc}")
+        payload = result.to_dict()
+        payload["degraded"] = False
+    except Exception as exc:                           # noqa: BLE001
+        HEALTH.failed(exc)
+        fallback = keyword_answer(question, retriever, reason=str(exc)[:160])
+        payload = {**fallback.to_dict(), "plan": [], "steps": [], "tables": [],
+                   "degraded": True, "stopped_early": False}
+
+    payload["model"] = HEALTH.snapshot()
     _store.audit(ACTOR, "agent", None, question[:200])
-    return result.to_dict()
+    return payload
+
+
+@app.get("/agent/stream")
+def agent_stream(question: str = Query(...), max_steps: int = Query(5)):
+    """The same agent run, reported as it happens (Server-Sent Events).
+
+    The agent runs on a worker thread and pushes events into a queue; this
+    generator drains the queue. Running it inline would buffer everything until
+    the answer, which defeats the point -- the tool calls and what they
+    retrieved are the interesting part, and they are worth watching arrive.
+    """
+    import queue
+    import threading
+
+    from api.agent import Agent
+    from api.ask import keyword_answer
+
+    question = (question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+
+    events: "queue.Queue[dict | None]" = queue.Queue()
+    agent = Agent(_state["bundles"], _state["gaps"], _retriever(), _today())
+
+    def work():
+        try:
+            agent.run(question, max_steps=max(2, min(6, max_steps)),
+                      on_event=events.put)
+        except ExtractionUnavailable as exc:
+            events.put({"type": "error", "message": f"Agent unavailable: {exc}"})
+        except Exception as exc:                       # noqa: BLE001
+            HEALTH.failed(exc)
+            fallback = keyword_answer(question, _retriever(),
+                                      reason=str(exc)[:160])
+            events.put({"type": "degraded", "model": HEALTH.snapshot(),
+                        **fallback.to_dict()})
+        finally:
+            events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+    _store.audit(ACTOR, "agent_stream", None, question[:200])
+
+    def emit():
+        yield f"data: {json.dumps({'type': 'started', 'question': question})}\n\n"
+        while True:
+            event = events.get()
+            if event is None:
+                break
+            yield f"data: {json.dumps(event)}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        emit(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/calendar")
@@ -529,22 +737,30 @@ def calendar(start: str | None = Query(None), end: str | None = Query(None),
 @app.post("/ask")
 def post_ask(question: str = Form(...), contract_id: str | None = Form(None)):
     """Answer from the extracted layer only. Never from the raw contract."""
-    from api.ask import ask
+    from api.ask import ask, keyword_answer
 
     question = (question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="question is required")
 
+    retriever = _retriever()
     try:
-        answer = ask(question, _retriever(), contract_id=contract_id or None)
-    except ExtractionUnavailable as exc:
-        raise HTTPException(status_code=503, detail=f"Ask unavailable: {exc}")
-    except Exception as exc:
-        raise HTTPException(status_code=502,
-                            detail=f"Ask failed against {llm_model()}: {exc}")
+        answer = ask(question, retriever, contract_id=contract_id or None)
+        payload = answer.to_dict()
+        payload["degraded"] = False
+    except Exception as exc:                           # noqa: BLE001
+        # Retrieval is local and unaffected by a model outage, so fall back to
+        # showing the matching passages rather than failing the request. The
+        # user loses the summary, not the search.
+        HEALTH.failed(exc)
+        answer = keyword_answer(question, retriever, contract_id or None,
+                                reason=str(exc)[:160])
+        payload = answer.to_dict()
+        payload["degraded"] = True
 
+    payload["model"] = HEALTH.snapshot()
     _store.audit(ACTOR, "ask", contract_id, question[:200])
-    return answer.to_dict()
+    return payload
 
 
 @app.get("/ui/model")

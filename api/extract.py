@@ -373,7 +373,8 @@ MAX_SPLIT_DEPTH = 3
 
 
 def _extract_chunk(
-    doc: Document, our_party: str, chunk: Chunk, verbose: bool, depth: int = 0
+    doc: Document, our_party: str, chunk: Chunk, verbose: bool, depth: int = 0,
+    on_wait=None,
 ) -> list[RawExtraction]:
     """Extract one chunk, halving it and retrying if the output overflows.
 
@@ -393,6 +394,7 @@ def _extract_chunk(
                 RawExtraction,
                 schema_name="contract_extraction",
                 verbose=verbose,
+                on_wait=on_wait,
             )
         ]
     except OutputTruncated:
@@ -404,7 +406,8 @@ def _extract_chunk(
                   f"{len(halves)} and retrying", flush=True)
         out: list[RawExtraction] = []
         for half in halves:
-            out.extend(_extract_chunk(doc, our_party, half, verbose, depth + 1))
+            out.extend(_extract_chunk(doc, our_party, half, verbose,
+                                      depth + 1, on_wait))
         return out
 
 
@@ -418,14 +421,31 @@ def call_model(
     our_party: str,
     use_cache: bool = True,
     verbose: bool = False,
+    on_chunk=None,
+    on_wait=None,
 ) -> RawExtraction:
+    """Extract a document, optionally reporting reading progress.
+
+    `on_chunk(index, total, start, end, cached)` receives the real character
+    range being read, so a caller can show where in the document the model is
+    working. A cached result still reports the ranges, because the reader wants
+    to see what was covered either way.
+    """
     path = _cache_path(doc, our_party)
+    chunks = chunk_document(doc)
+
     if use_cache and path.exists():
+        if on_chunk:
+            for i, chunk in enumerate(chunks):
+                on_chunk(i, len(chunks), chunk.start, chunk.end, True)
         return RawExtraction.model_validate_json(path.read_text())
 
     parts: list[RawExtraction] = []
-    for chunk in chunk_document(doc):
-        parts.extend(_extract_chunk(doc, our_party, chunk, verbose))
+    for i, chunk in enumerate(chunks):
+        if on_chunk:
+            on_chunk(i, len(chunks), chunk.start, chunk.end, False)
+        parts.extend(_extract_chunk(doc, our_party, chunk, verbose,
+                                    on_wait=on_wait))
 
     result = merge(parts)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)

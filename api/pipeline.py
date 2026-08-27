@@ -128,24 +128,62 @@ def analyze_contract(
     contract_id: str | None = None,
     doc_paths: dict[str, str] | None = None,
     use_cache: bool = True,
+    on_event=None,
 ) -> ContractBundle:
+    """`on_event(dict)` reports each stage as it completes.
+
+    The stages are the pipeline's own, in order, so a caller watching the
+    events is watching the real work rather than a scripted approximation.
+    """
+    emit = on_event or (lambda event: None)
     contract_id = contract_id or f"k_{uuid.uuid4().hex[:8]}"
     doc_index = {d.id: d for d in docs}
     paths = doc_paths or {}
 
     # 1. firewall -- before any model sees the text
-    reports = [firewall.inspect(d, paths.get(d.id)) for d in docs]
+    reports = []
+    for doc in docs:
+        report = firewall.inspect(doc, paths.get(doc.id))
+        reports.append(report)
+        emit({"type": "firewall", "doc_id": doc.id, "filename": doc.filename,
+              "quarantined": report.quarantined,
+              "indicators": [{"kind": i.kind, "detail": i.detail,
+                              "excerpt": i.excerpt[:160]}
+                             for i in report.indicators]})
 
     # 2. extract, per document
     claims_by_doc: dict[str, list[ClauseClaim]] = {}
     all_rules: list[TemporalRule] = []
     stats = extract_mod.GroundingStats()
     for doc in docs:
-        raw = extract_mod.call_model(doc, our_party, use_cache=use_cache)
+        def _chunk(i, total, start, end, cached, _doc=doc):
+            emit({"type": "reading", "doc_id": _doc.id, "chunk": i + 1,
+                  "chunks": total, "start": start, "end": end,
+                  "cached": cached})
+
+        def _wait(seconds, _doc=doc):
+            emit({"type": "throttled", "doc_id": _doc.id,
+                  "seconds": round(seconds)})
+
+        raw = extract_mod.call_model(doc, our_party, use_cache=use_cache,
+                                     on_chunk=_chunk, on_wait=_wait)
         claims, s1 = extract_mod.ground_clauses(
             raw, doc, contract_id, our_party, our_role)
         rules, s2 = extract_mod.ground_rules(
             raw, doc, contract_id, our_party, our_role)
+        for claim in claims:
+            emit({"type": "clause", "doc_id": doc.id, "id": claim.id,
+                  "clause_type": claim.clause_type.value,
+                  "favors": claim.party_favored,
+                  "start": claim.span.char_start, "end": claim.span.char_end,
+                  "quote": claim.span.quote[:220],
+                  "fields": {k: v for k, v in claim.fields.items()
+                             if k != "grounding"}})
+        for rule in rules:
+            emit({"type": "rule", "doc_id": doc.id, "kind": rule.kind,
+                  "anchor": rule.anchor, "offset_days": rule.offset_days,
+                  "start": rule.span.char_start, "end": rule.span.char_end,
+                  "quote": rule.span.quote[:220]})
         claims_by_doc[doc.id] = claims
         all_rules.extend(rules)
         stats = stats.merge(s1).merge(s2)
@@ -162,6 +200,10 @@ def analyze_contract(
     all_rules, rule_report = verify_rules(all_rules, doc_index)
     # Grounding rate spans BOTH gates: the model's quote had to be located in
     # the document, and the resulting span had to verify as an exact substring.
+    emit({"type": "verified",
+          "kept": claim_report.kept + rule_report.kept,
+          "discarded": claim_report.dropped + rule_report.dropped + stats.dropped,
+          "exact": stats.exact, "realigned": stats.fuzzy})
     surfaced = claim_report.kept + rule_report.kept
     attempted = stats.total
     grounding_rate = 1.0 if attempted == 0 else surfaced / attempted
@@ -171,12 +213,24 @@ def analyze_contract(
     contract = build_contract(contract_id, title, docs, claims, counterparty,
                               our_role, annual_value)
 
+    emit({"type": "family", "documents": len(docs),
+          "superseded": sum(1 for c in claims if not c.effective)})
+
     # 5. temporal -- compute real dates from relative rules
     initial_months, renewal_months = _term_shape(claims, all_rules)
     obligations, unresolved = temporal.materialize(
         all_rules, contract, today,
         initial_term_months=initial_months, renewal_months=renewal_months,
     )
+
+    for ob in obligations:
+        emit({"type": "deadline", "kind": ob.kind, "anchor": ob.anchor,
+              "due": ob.due_date.isoformat(), "owed_by": ob.owed_by,
+              "days": ob.days_remaining(today),
+              "description": ob.description,
+              "derivation": ob.derivation})
+    for reason in unresolved:
+        emit({"type": "unresolved", "reason": reason})
 
     # 6. findings
     findings: list[Finding] = []
@@ -189,6 +243,10 @@ def analyze_contract(
 
     findings, _ = verify_findings(findings, doc_index)
     findings.sort(key=lambda f: SEVERITY_ORDER[f.severity])
+    for finding in findings:
+        emit({"type": "finding", "kind": finding.kind,
+              "severity": finding.severity, "title": finding.title,
+              "evidenced": bool(finding.evidence)})
 
     return ContractBundle(
         contract=contract, docs=docs, claims=claims, rules=all_rules,

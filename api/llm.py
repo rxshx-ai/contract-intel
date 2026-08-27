@@ -41,6 +41,89 @@ TPM_HEADROOM = 0.92         # leave slack for tokenizer estimate error
 MAX_OUTPUT_TOKENS = int(os.environ.get("GROQ_MAX_OUTPUT", "5500"))
 
 
+class ModelHealth:
+    """What we know about the model right now, learned from real calls.
+
+    Not a synthetic ping: a probe that succeeds tells you nothing about whether
+    the next real request will be rate limited. This records the outcome of the
+    calls the product actually makes, so the indicator reflects the thing the
+    user is about to do.
+    """
+
+    def __init__(self) -> None:
+        self.status = "unknown"          # unknown|ok|rate_limited|error|no_key
+        self.detail = ""
+        self.last_ok: float | None = None
+        self.last_failure: float | None = None
+        self.consecutive_failures = 0
+        self.retry_after: float | None = None
+
+    # ---- recording -----------------------------------------------------
+
+    def ok(self) -> None:
+        import time
+
+        self.status = "ok"
+        self.detail = ""
+        self.last_ok = time.time()
+        self.consecutive_failures = 0
+        self.retry_after = None
+
+    def failed(self, exc: Exception, retry_after: float | None = None) -> None:
+        import time
+
+        name = type(exc).__name__
+        text = str(exc)
+        self.last_failure = time.time()
+        self.consecutive_failures += 1
+        if "rate_limit" in text or "RateLimit" in name or "429" in text:
+            self.status = "rate_limited"
+            self.detail = "The model is rate limited."
+            self.retry_after = retry_after
+        elif "GROQ_API_KEY" in text:
+            self.status = "no_key"
+            self.detail = "No API key is configured."
+        else:
+            self.status = "error"
+            self.detail = f"{name}: {text[:160]}"
+
+    # ---- reporting -----------------------------------------------------
+
+    @property
+    def usable(self) -> bool:
+        return self.status in ("ok", "unknown")
+
+    def snapshot(self) -> dict[str, Any]:
+        import time
+
+        if not os.environ.get("GROQ_API_KEY", "").strip():
+            return {"status": "no_key", "usable": False, "model": MODEL,
+                    "detail": "No GROQ_API_KEY is set.",
+                    "message": "The model is not connected. Search still works.",
+                    "consecutive_failures": self.consecutive_failures}
+        message = {
+            "ok": "Model connected.",
+            "unknown": "Model not called yet.",
+            "rate_limited": "Model is rate limited — it will come back shortly.",
+            "error": "Model is not responding.",
+            "no_key": "The model is not connected.",
+        }.get(self.status, "")
+        return {
+            "status": self.status,
+            "usable": self.usable,
+            "model": MODEL,
+            "detail": self.detail,
+            "message": message,
+            "consecutive_failures": self.consecutive_failures,
+            "seconds_since_ok": (round(time.time() - self.last_ok)
+                                 if self.last_ok else None),
+            "retry_after": self.retry_after,
+        }
+
+
+HEALTH = ModelHealth()
+
+
 class ExtractionUnavailable(RuntimeError):
     """No credentials, no cache, or the model could not produce valid output."""
 
@@ -97,6 +180,8 @@ def client():
 
     key = os.environ.get("GROQ_API_KEY")
     if not key:
+        HEALTH.status = "no_key"
+        HEALTH.detail = "No GROQ_API_KEY is set."
         raise ExtractionUnavailable(
             "GROQ_API_KEY is not set. Export it, or run against seeded demo "
             "contracts (see eval/make_fixtures.py --seed-cache)."
@@ -156,6 +241,7 @@ def complete_json(
     max_tokens: int | None = None,
     schema_name: str = "extraction",
     verbose: bool = False,
+    on_wait=None,
 ) -> T:
     """One structured completion, validated into `output_model`.
 
@@ -204,7 +290,10 @@ def complete_json(
             {"role": "user", "content": user},
         ]
 
-    BUDGET.reserve(prompt_tokens + max_tokens, verbose=verbose)
+    waited = BUDGET.reserve(prompt_tokens + max_tokens, verbose=verbose)
+    if waited and on_wait:
+        # A minute of silence looks like a hang. Say what is being waited on.
+        on_wait(waited)
     completion = _create_with_retry(
         model=model, messages=messages, response_format=response_format,
         temperature=temperature, max_tokens=max_tokens, verbose=verbose,
@@ -216,6 +305,7 @@ def complete_json(
             f"Extraction exceeded the {max_tokens:,}-token output budget. "
             f"Truncated output is rejected, never used."
         )
+    HEALTH.ok()
     try:
         return output_model.model_validate_json(content)
     except ValidationError as exc:
@@ -244,6 +334,7 @@ def _create_with_retry(*, model, messages, response_format, temperature,
         except groq.RateLimitError as exc:
             last = exc
             delay = _retry_after(exc) or min(60.0, 5.0 * (2 ** attempt))
+            HEALTH.failed(exc, retry_after=delay)
             if verbose:
                 print(f"    [rate limit] retrying in {delay:.0f}s "
                       f"(attempt {attempt + 1}/{attempts})", flush=True)
@@ -260,9 +351,16 @@ def _create_with_retry(*, model, messages, response_format, temperature,
         except groq.APIStatusError as exc:
             if exc.status_code and exc.status_code >= 500:
                 last = exc
+                HEALTH.failed(exc)
                 time.sleep(2.0 * (attempt + 1))
                 continue
+            HEALTH.failed(exc)
             raise
+        except Exception as exc:                       # network, DNS, timeout
+            HEALTH.failed(exc)
+            raise
+    if last is not None:
+        HEALTH.failed(last)
     raise ExtractionUnavailable(f"rate limited after {attempts} attempts: {last}")
 
 

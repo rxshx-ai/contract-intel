@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import BaseModel
 
@@ -339,11 +339,27 @@ class Agent:
         except Exception:
             return []
 
-    def run(self, question: str, max_steps: int = MAX_STEPS) -> AgentResult:
+    def run(self, question: str, max_steps: int = MAX_STEPS,
+            on_event: "Callable[[dict[str, Any]], None] | None" = None
+            ) -> AgentResult:
+        """Execute the loop, optionally reporting progress as it goes.
+
+        `on_event` receives a dict per milestone: the plan, each tool starting,
+        what a lookup retrieved, each tool finishing, and the answer. Streaming
+        and blocking callers share this one path, so the events cannot drift
+        from what actually happened.
+        """
+        emit = on_event or (lambda event: None)
+        return self._run(question, max_steps, emit)
+
+    def _run(self, question: str, max_steps: int,
+             emit: "Callable[[dict[str, Any]], None]") -> AgentResult:
         from api.compare import DIMENSIONS
 
         result = AgentResult(question=question)
+        emit({"type": "planning"})
         result.plan = self.make_plan(question)
+        emit({"type": "plan", "steps": result.plan})
         tools = tool_specs(sorted(DIMENSIONS))
         plan_text = ("\n".join(f"{i}. {s}" for i, s in enumerate(result.plan, 1))
                      or "1. Look up what is needed. 2. Answer.")
@@ -375,7 +391,10 @@ class Agent:
 
             prompt_tokens = sum(estimate_tokens(str(m.get("content") or ""))
                                 for m in messages) + 500
-            BUDGET.reserve(prompt_tokens + 800)
+            waited = BUDGET.reserve(prompt_tokens + 800)
+            if waited:
+                emit({"type": "throttled", "seconds": round(waited)})
+            emit({"type": "thinking", "step": step_no})
             try:
                 response = groq.chat.completions.create(
                     model=MODEL, messages=messages, tools=tools, tool_choice="auto",
@@ -424,12 +443,22 @@ class Agent:
                 args = {k: v for k, v in args.items() if v is not None}
 
                 payload: Any = {"ok": True}
+                emit({"type": "tool_start", "n": len(result.steps) + 1,
+                      "tool": name, "args": args})
+
                 if name == "finish":
                     result.answer = str(args.get("answer") or "").strip()
                     result.sufficient = bool(args.get("sufficient", True))
                     result.citations = self._resolve(args.get("cited_ids") or [])
                     result.steps.append(Step(len(result.steps) + 1, "finish", {},
                                              f"{len(result.citations)} citations"))
+                    emit({"type": "tool_end", "n": len(result.steps),
+                          "tool": "finish", "ok": True,
+                          "summary": f"{len(result.citations)} citations"})
+                    emit({"type": "answer", "answer": result.answer,
+                          "citations": result.citations,
+                          "sufficient": result.sufficient,
+                          "tables": result.tables})
                     return result
                 elif name in handlers:
                     signature = name + json.dumps(args, sort_keys=True)
@@ -457,6 +486,9 @@ class Agent:
                         Step(len(result.steps) + 1, name, args, summary, ok))
                     if name == "compare" and payload.get("ok"):
                         result.tables.append(payload)
+                    emit({"type": "tool_end", "n": len(result.steps),
+                          "tool": name, "ok": ok, "summary": summary,
+                          "retrieved": _retrieved(name, payload)})
                 else:
                     payload = {"error": f"unknown tool {name}"}
                     result.steps.append(Step(len(result.steps) + 1, name, args,
@@ -467,6 +499,7 @@ class Agent:
                     "content": json.dumps(payload)[:MAX_TOOL_CHARS],
                 })
 
+        emit({"type": "exhausted"})
         result.stopped_early = True
         result.answer = result.answer or (
             "I ran out of steps before reaching an answer. The plan and what I "
@@ -569,6 +602,45 @@ def _salvage_finish(exc: Exception) -> dict[str, Any] | None:
     if isinstance(args, dict) and str(args.get("answer") or "").strip():
         return args
     return None
+
+
+def _retrieved(name: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """What a lookup actually pulled back, in a shape the UI can show.
+
+    This is the part worth watching: not that a tool ran, but which clause,
+    from which document, with which wording.
+    """
+    if not isinstance(payload, dict):
+        return []
+    if name == "search":
+        return [{"kind": h.get("kind"), "contract": h.get("contract"),
+                 "title": h.get("title"), "quote": h.get("verbatim_quote")}
+                for h in payload.get("hits", [])[:6]]
+    if name == "compare" and payload.get("ok"):
+        return [{"kind": "comparison", "contract": r.get("contract"),
+                 "title": f"{payload.get('label', '')}: {r.get('display')}",
+                 "quote": r.get("quote")}
+                for r in payload.get("rows", [])[:6]]
+    if name == "deadlines":
+        return [{"kind": "deadline", "contract": d.get("contract"),
+                 "title": f"{d.get('kind')} due {d.get('due')} ({d.get('days')}d)",
+                 "quote": d.get("what")}
+                for d in payload.get("deadlines", [])[:6]]
+    if name == "calendar":
+        return [{"kind": "event", "contract": e.get("contract"),
+                 "title": f"{e.get('date')} {e.get('kind')}", "quote": None}
+                for e in payload.get("events", [])[:6]]
+    if name == "contract_facts":
+        return [{"kind": "contract", "contract": c.get("party"),
+                 "title": f"{c.get('type', '')} · {c.get('we_are', '')} · "
+                          f"attention {c.get('attention_score')}", "quote": None}
+                for c in payload.get("contracts", [])[:6]]
+    if name == "exit_cost":
+        return [{"kind": "cost", "contract": None,
+                 "title": f"{l.get('label')}: {l.get('amount'):,.0f}",
+                 "quote": None}
+                for l in payload.get("lines", [])[:6]]
+    return []
 
 
 def _summarize(name: str, payload: dict[str, Any]) -> str:
