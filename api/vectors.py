@@ -47,6 +47,7 @@ MAX_TEXT_CHARS = 1800
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 LOCAL_STORE = pathlib.Path(os.environ.get("VECTOR_STORE", ".vectors"))
+EMBEDDINGS_TABLE = os.environ.get("EMBEDDINGS_TABLE", "embeddings")
 
 
 class OllamaEmbedder:
@@ -272,6 +273,210 @@ class LocalBackend:
 # pinecone
 # --------------------------------------------------------------------------
 
+class PgVectorBackend:
+    """Vectors in the database you already run.
+
+    Chosen over a hosted vector service for this workload because it removes an
+    entire moving part: one store, one credential, one backup. A contract's
+    analysis and its embeddings are written in the same database, so they
+    cannot drift apart -- delete a contract and its vectors go with it, in the
+    same transaction, rather than leaving orphans in a separate service.
+
+    Embeddings are the same locally-generated nomic-embed-text vectors used
+    everywhere else; Postgres is storage and cosine search, nothing more.
+
+    GROUNDING: this table holds an id, a vector and a little metadata. The text
+    column is for inspection only and is never what the user sees -- every hit
+    is resolved back through the verified layer, so a displayed quote is one
+    that was checked against the source document.
+    """
+
+    name = "pgvector"
+
+    def __init__(self, namespace: str = "default", url: str | None = None,
+                 embedder: "OllamaEmbedder | None" = None,
+                 table: str = EMBEDDINGS_TABLE):
+        self.namespace = namespace
+        self.table = table
+        self.url = url or os.environ.get("DATABASE_URL", "").strip() or None
+        self.embedder = embedder or OllamaEmbedder()
+        self.conn = None
+        self.last_error: str | None = None
+        self.available = False
+
+        if not self.url:
+            self.last_error = "no DATABASE_URL"
+            return
+        if not self.embedder.available:
+            self.last_error = (f"DATABASE_URL is set but the embedder is not: "
+                               f"{self.embedder.last_error}")
+            return
+        self.available = self._connect()
+
+    def _connect(self) -> bool:
+        try:
+            import psycopg
+
+            self.conn = psycopg.connect(self.url, autocommit=True)
+            with self.conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+
+                # A vector column is fixed at one dimension. Changing embedding
+                # model silently breaks every upsert with an unhelpful error,
+                # so the mismatch is detected here: the table is rebuilt if it
+                # is empty, and refused with an explanation if it is not.
+                existing = self._existing_dimension(cur)
+                if existing is not None and existing != self.embedder.dimension:
+                    cur.execute(f"SELECT count(*) FROM {self.table}")
+                    rows = cur.fetchone()[0]
+                    if rows:
+                        self.last_error = (
+                            f"table '{self.table}' holds {rows} vectors of "
+                            f"dimension {existing}, but {self.embedder.model} "
+                            f"produces {self.embedder.dimension}. Re-embed with "
+                            f"the new model (DROP TABLE {self.table}) or set "
+                            f"EMBEDDINGS_TABLE to a different table.")
+                        return False
+                    cur.execute(f"DROP TABLE {self.table}")
+
+                cur.execute(
+                    f"""CREATE TABLE IF NOT EXISTS {self.table} (
+                        id           TEXT NOT NULL,
+                        namespace    TEXT NOT NULL,
+                        contract_id  TEXT,
+                        kind         TEXT,
+                        contract     TEXT,
+                        file         TEXT,
+                        text         TEXT,
+                        embedding    vector({self.embedder.dimension}) NOT NULL,
+                        PRIMARY KEY (namespace, id)
+                    )""")
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table}_contract "
+                            f"ON {self.table}(namespace, contract_id)")
+                # HNSW over cosine distance. Built once; ANN rather than a scan
+                # matters from a few thousand rows upward.
+                cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{self.table}_hnsw "
+                            f"ON {self.table} USING hnsw (embedding vector_cosine_ops)")
+            return True
+        except Exception as exc:                       # noqa: BLE001
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return False
+
+    def _existing_dimension(self, cur) -> int | None:
+        """Dimension of the vector column, or None if the table is absent."""
+        cur.execute(
+            "SELECT a.atttypmod FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid "
+            "WHERE c.relname = %s AND a.attname = 'embedding'", (self.table,))
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] and row[0] > 0 else None
+
+    @staticmethod
+    def _literal(vector: list[float]) -> str:
+        """pgvector accepts its own text form: '[1,2,3]'."""
+        return "[" + ",".join(f"{v:.7g}" for v in vector) + "]"
+
+    # ---- writes --------------------------------------------------------
+
+    def upsert(self, items: list[dict[str, Any]]) -> int:
+        if not self.available or not items:
+            return 0
+        rows = [i for i in items if (i.get("text") or "").strip()]
+        if not rows:
+            return 0
+        try:
+            vectors = self.embedder.embed([i["text"][:MAX_TEXT_CHARS] for i in rows])
+        except Exception as exc:                       # noqa: BLE001
+            self.last_error = f"embedding failed: {type(exc).__name__}: {exc}"
+            return 0
+        try:
+            with self.conn.cursor() as cur:
+                cur.executemany(
+                    f"""INSERT INTO {self.table}
+                         (id, namespace, contract_id, kind, contract, file, text,
+                          embedding)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (namespace, id) DO UPDATE SET
+                         contract_id = EXCLUDED.contract_id,
+                         kind = EXCLUDED.kind,
+                         contract = EXCLUDED.contract,
+                         file = EXCLUDED.file,
+                         text = EXCLUDED.text,
+                         embedding = EXCLUDED.embedding""",
+                    [(i["id"], self.namespace, i.get("contract_id"), i.get("kind"),
+                      i.get("contract"), i.get("file"), i["text"][:400],
+                      self._literal(v))
+                     for i, v in zip(rows, vectors)])
+            return len(rows)
+        except Exception as exc:                       # noqa: BLE001
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return 0
+
+    def delete_contract(self, contract_id: str) -> None:
+        if not self.available:
+            return
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(f"DELETE FROM {self.table} WHERE namespace = %s "
+                            f"AND contract_id = %s", (self.namespace, contract_id))
+        except Exception as exc:                       # noqa: BLE001
+            self.last_error = f"{type(exc).__name__}: {exc}"
+
+    # ---- reads ---------------------------------------------------------
+
+    def search(self, query: str, k: int = 10,
+               contract_id: str | None = None) -> list[VectorHit]:
+        if not self.available or not query.strip():
+            return []
+        try:
+            vector = self._literal(self.embedder.embed([query])[0])
+        except Exception as exc:                       # noqa: BLE001
+            self.last_error = f"embedding failed: {type(exc).__name__}: {exc}"
+            return []
+
+        # <=> is cosine DISTANCE, so similarity is 1 - distance and ASC is best.
+        sql = ("SELECT id, kind, contract, contract_id, file, "
+               "       1 - (embedding <=> %s::vector) AS score "
+               f"FROM {self.table} WHERE namespace = %s ")
+        args: list[Any] = [vector, self.namespace]
+        if contract_id:
+            sql += "AND contract_id = %s "
+            args.append(contract_id)
+        sql += "ORDER BY embedding <=> %s::vector LIMIT %s"
+        args += [vector, k]
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(sql, tuple(args))
+                rows = cur.fetchall()
+        except Exception as exc:                       # noqa: BLE001
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return []
+        return [VectorHit(id=r[0], score=float(r[5]),
+                          metadata={"kind": r[1], "contract": r[2],
+                                    "contract_id": r[3], "file": r[4]})
+                for r in rows]
+
+    def stats(self) -> dict[str, Any]:
+        if not self.available:
+            return {"enabled": False, "backend": "pgvector",
+                    "reason": self.last_error}
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(f"SELECT count(*) FROM {self.table} WHERE namespace = %s",
+                            (self.namespace,))
+                count = cur.fetchone()[0]
+                cur.execute("SELECT extversion FROM pg_extension WHERE extname='vector'")
+                version = (cur.fetchone() or ["?"])[0]
+            return {"enabled": True, "backend": "pgvector", "pgvector": version,
+                    "model": self.embedder.model,
+                    "dimension": self.embedder.dimension,
+                    "namespace": self.namespace, "vectors": count}
+        except Exception as exc:                       # noqa: BLE001
+            return {"enabled": False, "backend": "pgvector",
+                    "reason": f"{type(exc).__name__}: {exc}"}
+
+
 class PineconeBackend:
     """Pinecone as pure vector storage. Embeddings come from OllamaEmbedder.
 
@@ -455,11 +660,19 @@ def choose_backend(namespace: str = "default",
 
     embedder = embedder or OllamaEmbedder()
 
+    if requested in ("pgvector", "postgres", "pg"):
+        return PgVectorBackend(namespace, embedder=embedder)
     if requested == "pinecone":
         return PineconeBackend(namespace, embedder=embedder)
     if requested == "local":
         return LocalBackend(namespace, embedder=embedder)
 
+    # Prefer the database already in use: one store, one backup, and vectors
+    # that cannot drift from the analysis they describe.
+    if os.environ.get("DATABASE_URL", "").strip():
+        pg = PgVectorBackend(namespace, embedder=embedder)
+        if pg.available:
+            return pg
     if os.environ.get("PINECONE_API_KEY", "").strip():
         pinecone = PineconeBackend(namespace, embedder=embedder)
         if pinecone.available:

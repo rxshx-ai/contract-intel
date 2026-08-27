@@ -306,10 +306,13 @@ def test_explicit_none_disables(monkeypatch):
     assert choose_backend().available is False
 
 
-def test_pinecone_is_preferred_when_a_key_exists(monkeypatch):
+def test_pinecone_is_used_when_there_is_no_database(monkeypatch):
+    """Precedence is pgvector > pinecone > local > none. Postgres wins when
+    available because one store keeps vectors and analysis from drifting."""
     from api.vectors import choose_backend
 
     monkeypatch.setenv("VECTOR_BACKEND", "auto")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("PINECONE_API_KEY", "pc-test")
     assert choose_backend().name == "pinecone"
 
@@ -319,6 +322,7 @@ def test_falls_back_to_local_then_none(monkeypatch):
 
     monkeypatch.setenv("VECTOR_BACKEND", "auto")
     monkeypatch.delenv("PINECONE_API_KEY", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
     class Dead(vec.LocalBackend):
         def __init__(self, namespace="default", **kw):

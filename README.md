@@ -365,35 +365,43 @@ another's contracts.
 ### Vectors
 
 Embeddings are generated **locally with `nomic-embed-text` (768-dim) via
-Ollama**, for both backends:
+Ollama**. The store is pluggable; precedence is **pgvector → Pinecone → local →
+none**, or set `VECTOR_BACKEND` explicitly.
 
-| Backend | When | Role |
+| Backend | When | Notes |
 |---|---|---|
-| `pinecone` | `PINECONE_API_KEY` set | Vector **storage**. We send our own vectors |
-| `local` | Ollama reachable | Storage and search in-process, persisted to `.vectors/` |
-| `none` | neither | BM25 only; every method a no-op |
+| `pgvector` | `DATABASE_URL` set | **Default.** Vectors in the database you already run |
+| `pinecone` | `PINECONE_API_KEY`, no database | Hosted vector service |
+| `local` | Ollama only | Cosine in-process, persisted to `.vectors/` |
+| `none` | nothing configured | BM25 only; every method a no-op |
 
-**Not Pinecone integrated inference.** Integrated inference embeds server-side
-with their hosted model, which would mean one vector space in production and a
-different one locally — retrieval you cannot reproduce or debug on your own
-machine. Generating vectors ourselves keeps the two identical, and the index
-dimension is probed from the embedder rather than hardcoded, because a mismatch
-rejects every upsert.
+**Postgres is preferred over a hosted vector service** for this workload. It
+removes a moving part — one store, one credential, one backup — and a
+contract's analysis and its embeddings are written to the same database, so
+they cannot drift apart. `DELETE /contracts/{id}` removes the contract, its
+documents and its vectors together rather than leaving orphans in a second
+service.
+
+Schema: `embeddings(id, namespace, contract_id, kind, contract, file, text,
+embedding vector(768))` with an **HNSW index over cosine distance**. `<=>` is
+distance, so similarity is `1 - (embedding <=> query)`.
+
+A vector column is fixed at one dimension, so **changing embedding model is
+detected at connect**: the table is rebuilt if empty, and refused with an
+explanation if it holds vectors. Silently failing every upsert with a type
+error is not an acceptable way to discover that.
 
 #### Grounding survives the vector store
 
-Pinecone holds an **id, a vector, and a little metadata**. The text stored
-alongside is for debugging in their console and is **never what the user sees**.
-Every hit is resolved back through the local verified layer, so a displayed
-quote is always one checked character-for-character against the source
-document. An id the vector store returns that we do not recognise — a stale
-vector from a deleted contract, say — is dropped rather than rendered.
+The store holds an **id, a vector and a little metadata**. Its `text` column is
+for inspection and is **never what the user sees**. Every hit resolves back
+through the verified layer, so a displayed quote is one checked
+character-for-character against the source document, and an id we do not
+recognise — a stale vector from a deleted contract — is dropped rather than
+rendered. There is a test that feeds back a correct id with **falsified
+metadata** and asserts the lie never reaches the output.
 
-There is a test for exactly this: a vector backend that returns the right id
-with **falsified metadata**, asserting the rendered quote is the verified one
-and the lie never reaches the output.
-
-Measured end to end on the real corpus:
+Measured against real pgvector 0.8.6:
 
 ```
 Q: "how fast do they have to warn us after a security incident"
@@ -402,28 +410,25 @@ Q: "how fast do they have to warn us after a security incident"
     GROUNDED: True  (msa_northwind.txt chars 2780-2952)
 ```
 
-Vectors are fused with BM25 by **Reciprocal Rank Fusion** (position only — BM25
-scores are unbounded, cosine is bounded, so a numeric blend needs a calibration
-that drifts). Indexing is automatic and idempotent on first retrieval; 200
-items embed in ~7 seconds.
+Note the query shares almost no vocabulary with the clause — "warn" vs
+"notify", "security incident" vs "breach of Customer Data". That is retrieval
+BM25 cannot do, which is why the two are fused (Reciprocal Rank Fusion, by
+position only — BM25 scores are unbounded and cosine is bounded).
 
 ```bash
 ollama pull nomic-embed-text
-export PINECONE_API_KEY=...        # optional: storage instead of local
+docker compose up -d
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5433/contract_intel
 curl localhost:8077/system
 ```
 
-**Verified:** local backend end to end with real embeddings; the Pinecone
-upsert/query shapes exercised against a fake index (vector payloads, scope
-filters, batching, match parsing). **Unverified:** the Pinecone network calls
-themselves — no key has been available. The SDK usage was checked against the
-installed client, which caught three real errors (`upsert`/`query` are
-keyword-only, and matches expose `id`/`score`/`metadata`).
+Indexing is automatic and idempotent on first retrieval; 200 items embed in
+~6 seconds.
 
-**Is a vector DB warranted?** At ~15,000 items for 300 contracts this is not a
-scale problem — the local backend does it in milliseconds. Vectors earn their
-place for *paraphrase recall*, not speed. Pinecone is for when the corpus
-outgrows one process.
+**Verified against real Postgres 17 + pgvector 0.8.6**: 200 vectors stored,
+cosine ranking, scope filters, namespace isolation, dimension-change refusal,
+and grounded citations end to end. Pinecone remains **unverified over the
+network** — its upsert/query shapes are exercised against a fake index only.
 
 ## Deploying to AWS
 

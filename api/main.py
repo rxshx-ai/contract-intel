@@ -433,6 +433,19 @@ def vectors_stats():
     return _vectors.stats()
 
 
+@app.delete("/contracts/{contract_id}")
+def delete_contract(contract_id: str):
+    """Remove a contract, its documents and its vectors together."""
+    _bundle(contract_id)                       # 404 if unknown
+    _store.delete_contract(contract_id)
+    _vectors.delete_contract(contract_id)      # same database when on pgvector
+    _state["bundles"] = [b for b in _state["bundles"]
+                         if b.contract.id != contract_id]
+    _refresh_portfolio()
+    _store.audit(ACTOR, "delete", contract_id)
+    return {"deleted": contract_id, "remaining": len(_state["bundles"])}
+
+
 @app.get("/system")
 def system_info():
     """What this process is actually backed by."""

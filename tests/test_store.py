@@ -14,9 +14,12 @@ from api.store import Store
 
 
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path, request):
+    # A unique tenant per test: against a shared Postgres the tables persist
+    # between tests and runs, so a fixed tenant would see other tests' rows.
+    tenant = f"t_{request.node.name[:40]}_{os.getpid()}"
     s = Store(url=os.environ.get("DATABASE_URL"),
-              sqlite_path=tmp_path / "t.db", tenant="t1")
+              sqlite_path=tmp_path / "t.db", tenant=tenant)
     yield s
     s.close()
 
