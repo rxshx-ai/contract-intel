@@ -71,15 +71,15 @@ def northwind_raw():
 
 @pytest.fixture(scope="session")
 def northwind_claims(northwind_raw, northwind):
-    claims, dropped = ground_clauses(northwind_raw, northwind, "k_nw")
-    assert dropped == 0, "fixture must ground cleanly"
+    claims, stats = ground_clauses(northwind_raw, northwind, "k_nw")
+    assert stats.dropped == 0, "fixture must ground cleanly"
     return claims
 
 
 @pytest.fixture(scope="session")
 def northwind_rules(northwind_raw, northwind):
-    rules, dropped = ground_rules(northwind_raw, northwind, "k_nw")
-    assert dropped == 0
+    rules, stats = ground_rules(northwind_raw, northwind, "k_nw")
+    assert stats.dropped == 0
     return rules
 
 
@@ -93,8 +93,8 @@ def northwind_contract():
 
 @pytest.fixture(scope="session")
 def acme_claims(acme):
-    claims, dropped = ground_clauses(_raw("customer_msa_acme.json"), acme, "k_acme")
-    assert dropped == 0
+    claims, stats = ground_clauses(_raw("customer_msa_acme.json"), acme, "k_acme")
+    assert stats.dropped == 0
     return claims
 
 
@@ -108,15 +108,15 @@ def acme_contract():
 
 @pytest.fixture(scope="session")
 def nda_claims(nda):
-    claims, dropped = ground_clauses(_raw("nda_helios.json"), nda, "k_nda")
-    assert dropped == 0
+    claims, stats = ground_clauses(_raw("nda_helios.json"), nda, "k_nda")
+    assert stats.dropped == 0
     return claims
 
 
 @pytest.fixture(scope="session")
 def poisoned_claims(poisoned):
-    claims, dropped = ground_clauses(_raw("poisoned_msa_vertex.json"), poisoned, "k_px")
-    assert dropped == 0
+    claims, stats = ground_clauses(_raw("poisoned_msa_vertex.json"), poisoned, "k_px")
+    assert stats.dropped == 0
     return claims
 
 

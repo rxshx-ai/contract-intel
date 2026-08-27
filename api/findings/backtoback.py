@@ -15,7 +15,7 @@ precisely why the architecture is shaped the way it is.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Callable
 
 from api.schemas import (
     ClauseClaim,

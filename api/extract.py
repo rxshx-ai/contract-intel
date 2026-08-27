@@ -1,25 +1,32 @@
 """The ONLY module that talks to a language model. Invariant 3.
 
-The model does exactly one job: point at spans of contract text and label
-them. It returns QUOTES, never offsets -- language models cannot count
-characters, so we recover offsets ourselves in ingest.find_span(). It also
-never returns a date, a score, or a total; those are computed downstream.
+Served by Groq (see api/llm.py). The model does exactly one job: point at
+spans of contract text and label them. It returns QUOTES, never offsets --
+language models cannot count characters, so we recover offsets ourselves via
+ingest.locate(). It never returns a date, a score, or a total; those are
+computed downstream.
 
-Results are cached by document SHA-256 so a demo can run without network.
+Because open-weight models paraphrase inside text they were told to copy,
+locate() falls back to alignment-based recovery. That raises recall without
+weakening invariant 1: the Span always carries the DOCUMENT's text, never the
+model's, so verify.py's exact-substring check still holds by construction.
+
+Results are cached by (document SHA-256, party, model) so a demo runs offline.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import pathlib
 import uuid
+from dataclasses import dataclass, field as dc_field
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from api.firewall import wrap_untrusted
-from api.ingest import find_span
+from api.ingest import locate
+from api.llm import MODEL, complete_json
 from api.schemas import (
     ClauseClaim,
     ClauseType,
@@ -28,7 +35,6 @@ from api.schemas import (
     TemporalRule,
 )
 
-MODEL = "claude-opus-5"
 CACHE_DIR = pathlib.Path(os.environ.get("CONTRACT_CACHE", ".cache"))
 
 
@@ -151,19 +157,12 @@ def call_model(doc: Document, our_party: str, use_cache: bool = True) -> RawExtr
     if use_cache and path.exists():
         return RawExtraction.model_validate_json(path.read_text())
 
-    import anthropic
-
-    client = anthropic.Anthropic()
-    response = client.messages.parse(
-        model=MODEL,
-        max_tokens=16000,
-        thinking={"type": "adaptive"},
-        output_config={"effort": "high"},
-        system=SYSTEM,
-        messages=[{"role": "user", "content": _user_message(doc, our_party)}],
-        output_format=RawExtraction,
+    result = complete_json(
+        SYSTEM,
+        _user_message(doc, our_party),
+        RawExtraction,
+        schema_name="contract_extraction",
     )
-    result = response.parsed_output
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path.write_text(result.model_dump_json(indent=2))
     return result
@@ -183,27 +182,67 @@ _FIELD_KEYS = (
 )
 
 
+@dataclass
+class GroundingStats:
+    """How each claim was located. Reported rather than hidden."""
+
+    exact: int = 0
+    whitespace: int = 0
+    fuzzy: int = 0
+    dropped: int = 0
+    dropped_reasons: list[str] = dc_field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return self.exact + self.whitespace + self.fuzzy + self.dropped
+
+    @property
+    def rate(self) -> float:
+        return 1.0 if self.total == 0 else (self.total - self.dropped) / self.total
+
+    def merge(self, other: "GroundingStats") -> "GroundingStats":
+        return GroundingStats(
+            exact=self.exact + other.exact,
+            whitespace=self.whitespace + other.whitespace,
+            fuzzy=self.fuzzy + other.fuzzy,
+            dropped=self.dropped + other.dropped,
+            dropped_reasons=self.dropped_reasons + other.dropped_reasons,
+        )
+
+    def summary(self) -> str:
+        return (f"{self.exact} exact, {self.whitespace} reflowed, "
+                f"{self.fuzzy} realigned, {self.dropped} discarded "
+                f"({self.rate:.1%} grounded)")
+
+
 def ground_clauses(
     raw: RawExtraction, doc: Document, contract_id: str
-) -> tuple[list[ClauseClaim], int]:
-    """Attach real offsets. Returns (grounded claims, dropped count).
+) -> tuple[list[ClauseClaim], GroundingStats]:
+    """Attach real offsets.
 
     A claim whose quote cannot be located in the document is DROPPED. This is
     invariant 1: ungrounded output never reaches the user.
     """
     claims: list[ClauseClaim] = []
-    dropped = 0
+    stats = GroundingStats()
     for rc in raw.clauses:
         try:
             ctype = ClauseType(rc.clause_type)
         except ValueError:
-            dropped += 1
+            stats.dropped += 1
+            stats.dropped_reasons.append(f"unknown clause_type {rc.clause_type!r}")
             continue
-        span = find_span(doc, rc.quote)
+        span, how = locate(doc, rc.quote)
         if span is None:
-            dropped += 1
+            stats.dropped += 1
+            stats.dropped_reasons.append(
+                f"{rc.clause_type}: quote not in document: {rc.quote[:70]!r}")
             continue
-        fields = {k: getattr(rc, k) for k in _FIELD_KEYS if getattr(rc, k) not in (None, "", False)}
+        setattr(stats, how, getattr(stats, how) + 1)
+        fields = {k: getattr(rc, k) for k in _FIELD_KEYS
+                  if getattr(rc, k) not in (None, "", False)}
+        if how == "fuzzy":
+            fields["grounding"] = "realigned"
         claims.append(
             ClauseClaim(
                 id=f"cl_{uuid.uuid4().hex[:8]}",
@@ -215,19 +254,22 @@ def ground_clauses(
                 confidence=rc.confidence,
             )
         )
-    return claims, dropped
+    return claims, stats
 
 
 def ground_rules(
     raw: RawExtraction, doc: Document, contract_id: str
-) -> tuple[list[TemporalRule], int]:
+) -> tuple[list[TemporalRule], GroundingStats]:
     rules: list[TemporalRule] = []
-    dropped = 0
+    stats = GroundingStats()
     for rr in raw.temporal_rules:
-        span = find_span(doc, rr.quote)
+        span, how = locate(doc, rr.quote)
         if span is None:
-            dropped += 1
+            stats.dropped += 1
+            stats.dropped_reasons.append(
+                f"rule {rr.kind}: quote not in document: {rr.quote[:70]!r}")
             continue
+        setattr(stats, how, getattr(stats, how) + 1)
         rules.append(
             TemporalRule(
                 id=f"tr_{uuid.uuid4().hex[:8]}",
@@ -242,7 +284,7 @@ def ground_rules(
                 span=span,
             )
         )
-    return rules, dropped
+    return rules, stats
 
 
 ROLE_MAP = {"buyer": OurRole.BUYER, "seller": OurRole.SELLER, "mutual": OurRole.MUTUAL}
@@ -250,8 +292,8 @@ ROLE_MAP = {"buyer": OurRole.BUYER, "seller": OurRole.SELLER, "mutual": OurRole.
 
 def extract(
     doc: Document, our_party: str, contract_id: str, use_cache: bool = True
-) -> tuple[RawExtraction, list[ClauseClaim], list[TemporalRule], int]:
+) -> tuple[RawExtraction, list[ClauseClaim], list[TemporalRule], GroundingStats]:
     raw = call_model(doc, our_party, use_cache=use_cache)
-    claims, d1 = ground_clauses(raw, doc, contract_id)
-    rules, d2 = ground_rules(raw, doc, contract_id)
-    return raw, claims, rules, d1 + d2
+    claims, s1 = ground_clauses(raw, doc, contract_id)
+    rules, s2 = ground_rules(raw, doc, contract_id)
+    return raw, claims, rules, s1.merge(s2)

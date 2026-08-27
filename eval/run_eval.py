@@ -26,6 +26,7 @@ from collections import defaultdict
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from api.extract import RawExtraction, call_model, ground_clauses
+from api.llm import MODEL
 from api.ingest import ingest_text
 from api.schemas import ClauseClaim, Document
 from api.verify import verify_claims
@@ -85,13 +86,14 @@ def evaluate(self_check: bool) -> int:
     totals = [0, 0, 0]
     grounded_total = dropped_total = 0
     latencies: list[float] = []
+    grounding: list = []
 
     for filename in EVAL_SET:
         doc: Document = ingest_text((CONTRACTS / filename).read_text(), filename)
         gold_raw = RawExtraction.model_validate_json(
             (FIXTURES / filename.replace(".txt", ".json")).read_text()
         )
-        gold, _ = ground_clauses(gold_raw, doc, "gold")
+        gold, _gs = ground_clauses(gold_raw, doc, "gold")
 
         started = time.time()
         if self_check:
@@ -100,10 +102,11 @@ def evaluate(self_check: bool) -> int:
             pred_raw = call_model(doc, OUR_PARTY, use_cache=False)
         latencies.append(time.time() - started)
 
-        pred, dropped = ground_clauses(pred_raw, doc, "pred")
+        pred, gstats = ground_clauses(pred_raw, doc, "pred")
         pred, report = verify_claims(pred, {doc.id: doc})
         grounded_total += len(pred)
-        dropped_total += dropped + report.dropped
+        dropped_total += gstats.dropped + report.dropped
+        grounding.append(gstats)
 
         types = {c.clause_type for c in pred} | {c.clause_type for c in gold}
         for ctype in types:
@@ -136,6 +139,11 @@ def evaluate(self_check: bool) -> int:
     print(f"  clause types covered  : {len(per_type)}")
     print(f"  grounding rate        : {grounding:.1%}")
     print(f"  ungrounded, discarded : {dropped_total}")
+    if grounding:
+        merged = grounding[0]
+        for g in grounding[1:]:
+            merged = merged.merge(g)
+        print(f"  span provenance       : {merged.summary()}")
     print(f"  hallucination rate    : 0.000  (by construction -- see api/verify.py)")
     print(f"  median latency        : {sorted(latencies)[len(latencies)//2]:.1f}s/contract")
 
@@ -148,5 +156,5 @@ def evaluate(self_check: bool) -> int:
 if __name__ == "__main__":
     self_check = "--self" in sys.argv
     print("HARNESS SELF-CHECK (gold vs gold)\n" if self_check
-          else "LIVE EXTRACTION EVAL\n")
+          else f"LIVE EXTRACTION EVAL - model: {MODEL}\n")
     raise SystemExit(evaluate(self_check))

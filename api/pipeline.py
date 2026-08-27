@@ -51,6 +51,8 @@ class ContractBundle:
     unresolved: list[str] = field(default_factory=list)
     grounding_rate: float = 1.0
     dropped: int = 0
+    grounding: "extract_mod.GroundingStats" = field(
+        default_factory=lambda: extract_mod.GroundingStats())
 
     def result(self) -> AnalysisResult:
         report, _ = measure_asymmetry(self.claims, self.contract)
@@ -93,14 +95,14 @@ def analyze_contract(
     # 2. extract, per document
     claims_by_doc: dict[str, list[ClauseClaim]] = {}
     all_rules: list[TemporalRule] = []
-    dropped = 0
+    stats = extract_mod.GroundingStats()
     for doc in docs:
         raw = extract_mod.call_model(doc, our_party, use_cache=use_cache)
-        claims, d1 = extract_mod.ground_clauses(raw, doc, contract_id)
-        rules, d2 = extract_mod.ground_rules(raw, doc, contract_id)
+        claims, s1 = extract_mod.ground_clauses(raw, doc, contract_id)
+        rules, s2 = extract_mod.ground_rules(raw, doc, contract_id)
         claims_by_doc[doc.id] = claims
         all_rules.extend(rules)
-        dropped += d1 + d2
+        stats = stats.merge(s1).merge(s2)
         if annual_value is None and raw.annual_value:
             annual_value = raw.annual_value
 
@@ -112,11 +114,11 @@ def analyze_contract(
         doc_id: [c for c in cs if c.id in kept_ids] for doc_id, cs in claims_by_doc.items()
     }
     all_rules, rule_report = verify_rules(all_rules, doc_index)
-    total = claim_report.total + rule_report.total
-    grounding_rate = (
-        1.0 if total == 0
-        else (claim_report.kept + rule_report.kept) / total
-    )
+    # Grounding rate spans BOTH gates: the model's quote had to be located in
+    # the document, and the resulting span had to verify as an exact substring.
+    surfaced = claim_report.kept + rule_report.kept
+    attempted = stats.total
+    grounding_rate = 1.0 if attempted == 0 else surfaced / attempted
 
     # 4. family -- resolve amendments into effective values
     claims, _lineage = resolve_supersession(claims_by_doc, docs)
@@ -146,7 +148,8 @@ def analyze_contract(
         contract=contract, docs=docs, claims=claims, rules=all_rules,
         obligations=obligations, findings=findings, firewall_reports=reports,
         unresolved=unresolved, grounding_rate=grounding_rate,
-        dropped=dropped + claim_report.dropped + rule_report.dropped,
+        dropped=stats.dropped + claim_report.dropped + rule_report.dropped,
+        grounding=stats,
     )
 
 

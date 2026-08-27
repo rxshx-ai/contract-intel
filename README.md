@@ -11,7 +11,21 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
 No API key is needed for the demo — extractions are cached by document hash.
-Set `ANTHROPIC_API_KEY` to analyze new documents.
+To analyze new documents:
+
+```bash
+export GROQ_API_KEY=gsk_...
+.venv/bin/python eval/smoke_groq.py      # verify the provider works
+.venv/bin/python eval/run_eval.py        # score it against the gold fixtures
+```
+
+**Model:** `openai/gpt-oss-120b` on Groq — 131k context, 65k max output, strict
+`json_schema` support, ~500 tok/s. Override with `GROQ_MODEL`. The provider
+lives entirely in `api/llm.py`; swapping it touches one file, because
+`extract.py` is the only module that talks to a model (invariant 3).
+
+Note the extraction cache is keyed by `(document SHA-256, party, model)`, so
+after changing `GROQ_MODEL` re-run `eval/make_fixtures.py --seed-cache`.
 
 ## What it is for
 
@@ -37,7 +51,7 @@ Every design decision descends from these.
 2. **The LLM never does arithmetic or logic.** It converts language into
    structured claims. Dates, scores, comparisons and aggregations are
    deterministic Python. The model returns *quotes only* — never offsets,
-   because language models cannot count characters; `find_span` recovers them.
+   because language models cannot count characters; `locate()` recovers them.
 3. **One module talks to the model** (`extract.py`). Everything downstream is
    pure and tested with zero network.
 4. **Document text is untrusted input**, fenced with an unguessable nonce and
@@ -55,6 +69,27 @@ Every design decision descends from these.
 | **Prompt-injection firewall** | Documents are adversarially authored. Hidden instructions are reported as a *tampering indicator on the counterparty* — the attack becomes a finding about the vendor. |
 | **Power asymmetry index** | Comparative, not absolute, so it's honest — and it yields the negotiation ask list for free. |
 
+## Grounding an open-weight model
+
+Open models paraphrase inside text they were told to copy verbatim — dropping a
+word, normalizing "forty-five (45) days" to "45 days". Discarding those costs
+recall for no safety benefit, so `locate()` escalates through three stages and
+records which one hit:
+
+| Stage | What it handles |
+|---|---|
+| `exact` | byte-identical substring |
+| `whitespace` | model reflowed line breaks inside the quote |
+| `realigned` | model dropped/altered words — recovered by difflib alignment, ≥0.85 similarity + length plausibility |
+| `discarded` | not in the document. Dropped. |
+
+**This does not weaken invariant 1.** A recovered Span always carries the
+*document's* text, never the model's, so `verify.py`'s exact-substring check
+still passes by construction. The risk it guards against is different —
+anchoring to the wrong passage — which is what the similarity floor is for.
+Provenance is reported, not hidden: `/portfolio/stats` and the eval harness both
+print the exact/reflowed/realigned/discarded split.
+
 ## Architecture
 
 ```
@@ -70,7 +105,8 @@ whole reasoning layer reproducible.
 |---|---|
 | `api/ingest.py` | PDF/text → canonical text + offsets. Normalizes **once**, before any offset exists. |
 | `api/firewall.py` | Invisible/tiny/off-page text, metadata payloads, injection language; nonce fencing. |
-| `api/extract.py` | The only model caller. Structured output via `messages.parse`, cached by SHA-256. |
+| `api/llm.py` | Groq client; Pydantic → strict `json_schema` rewrite. The only provider-aware file. |
+| `api/extract.py` | The only model caller. Structured output, temperature 0, cached by SHA-256. |
 | `api/verify.py` | The grounding gate. Drops anything unquotable. |
 | `api/family.py` | Document graph, amendment supersession, lineage. |
 | `api/temporal.py` | Rules → dated obligations with derivation chains. |
@@ -81,9 +117,10 @@ whole reasoning layer reproducible.
 ## Verification
 
 ```bash
-.venv/bin/python -m pytest tests/ -q      # 109 tests, one touches the network path
+.venv/bin/python -m pytest tests/ -q      # 124 tests, none touch the network
 .venv/bin/python eval/run_eval.py --self  # harness self-check (must score 1.00)
-.venv/bin/python eval/run_eval.py         # live accuracy (needs ANTHROPIC_API_KEY)
+.venv/bin/python eval/smoke_groq.py       # one real Groq call (needs GROQ_API_KEY)
+.venv/bin/python eval/run_eval.py         # live accuracy against gold fixtures
 ```
 
 The property test `span.quote == text[start:end]` is invariant 1 mechanized and
@@ -106,10 +143,18 @@ three bad rows is more credible than one with none.
 
 Honest list, since the deliverable is decision support:
 
-- **Extraction has never run live here** — no `ANTHROPIC_API_KEY` was available.
-  `extract.py` is written against the documented `messages.parse` API but is
-  unexercised; the demo runs on hand-authored fixtures seeded into the cache.
-  This is the one thing to verify first.
+- **Extraction has never run live here** — no `GROQ_API_KEY` was available.
+  `api/llm.py` is written against Groq's documented strict `json_schema` API and
+  its schema rewriting is unit-tested, but no real completion has been made. The
+  demo runs on hand-authored fixtures seeded into the cache. Run
+  `eval/smoke_groq.py` first; it is built for exactly this check.
+- **Grounding rate on a real open-weight model is unmeasured.** The fuzzy
+  recovery stage exists because `gpt-oss-120b` is expected to paraphrase more
+  than a frontier model would, but the actual exact/realigned/discarded split is
+  unknown until the smoke test runs. If it comes back below ~80%, try
+  `GROQ_MODEL=moonshotai/kimi-k2-instruct` or tighten the prompt.
+- **No chunking.** Documents over ~380k characters are rejected with a clear
+  error rather than silently truncated.
 - **OCR is best-effort** — requires `pytesseract` + `pdf2image`, absent here.
   Falls back to the text layer and reports `used_ocr=False` rather than failing.
 - Supersession matches on clause *type*, not section number, so an amendment

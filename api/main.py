@@ -18,12 +18,17 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from api import db, demo
+from api.llm import MODEL as llm_model_name, ExtractionUnavailable
 from api.findings.backtoback import exposure_summary
 from api.findings.termination import termination_cost
 from api.ingest import ingest_pdf, ingest_text
 from api.pipeline import analyze_contract, analyze_portfolio, upcoming_deadlines
 from api.risk import band
 from api.schemas import OurRole
+
+def llm_model() -> str:
+    return llm_model_name
+
 
 ROOT = Path(__file__).resolve().parents[1]
 TENANT = "demo"          # single-tenant demo; every query still filters on it
@@ -133,13 +138,12 @@ async def create_contract(
             our_role=OurRole(our_role), our_party=our_party, today=_today(),
             annual_value=annual_value, doc_paths=paths,
         )
-    except Exception as exc:  # extraction unavailable (no API key / no cache)
+    except ExtractionUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"Extraction unavailable: {exc}")
+    except Exception as exc:  # provider error, rate limit, timeout
         raise HTTPException(
-            status_code=503,
-            detail=(
-                "Extraction unavailable for this document. Set ANTHROPIC_API_KEY to "
-                f"analyze new documents, or use a seeded demo contract. ({exc})"
-            ),
+            status_code=502,
+            detail=f"Extraction failed against {llm_model()}: {exc}",
         )
 
     _state["bundles"] = [b for b in _state["bundles"]
@@ -277,11 +281,22 @@ def portfolio_gaps():
 
 @app.get("/portfolio/stats")
 def portfolio_stats():
+    from api.extract import GroundingStats
+    from api.llm import MODEL
+
     bundles = _state["bundles"]
     total = sum(len(b.claims) for b in bundles)
     dropped = sum(b.dropped for b in bundles)
+    merged = GroundingStats()
+    for b in bundles:
+        merged = merged.merge(b.grounding)
     return {
         "today": _today().isoformat(),
+        "model": MODEL,
+        "span_provenance": {
+            "exact": merged.exact, "reflowed": merged.whitespace,
+            "realigned": merged.fuzzy, "discarded": merged.dropped,
+        },
         "contracts": len(bundles),
         "documents": sum(len(b.docs) for b in bundles),
         "grounded_claims": total,

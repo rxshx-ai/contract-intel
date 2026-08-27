@@ -201,3 +201,92 @@ def find_span(doc: Document, quote: str, hint: int = 0) -> Span | None:
         char_end=match.end(),
         quote=text[match.start() : match.end()],  # the REAL text, not the model's
     )
+
+
+# --------------------------------------------------------------------------
+# fuzzy recovery -- for models that paraphrase inside a "verbatim" quote
+# --------------------------------------------------------------------------
+
+FUZZY_THRESHOLD = 0.85
+_ANCHOR_WORDS = 5
+
+
+def _anchor_candidates(tokens: list[str]) -> list[list[str]]:
+    """Try the start, middle and end of the quote as anchors, in that order."""
+    n = len(tokens)
+    if n <= _ANCHOR_WORDS:
+        return [tokens]
+    mid = max(0, (n - _ANCHOR_WORDS) // 2)
+    return [
+        tokens[:_ANCHOR_WORDS],
+        tokens[mid : mid + _ANCHOR_WORDS],
+        tokens[-_ANCHOR_WORDS:],
+    ]
+
+
+def find_span_fuzzy(
+    doc: Document, quote: str, threshold: float = FUZZY_THRESHOLD
+) -> Span | None:
+    """Locate a near-miss quote and return the DOCUMENT's text for that range.
+
+    Weaker models drop a word, fix a typo, or expand an abbreviation inside
+    text they were told to copy verbatim. Dropping those extractions costs
+    recall for no safety benefit, because we never surface the model's string:
+    the returned Span always quotes the document itself.
+
+    Invariant 1 is therefore untouched -- verify.py still checks
+    `text[start:end] == quote`, and that holds by construction here. The risk
+    this guards against is different: anchoring to the WRONG passage. Hence a
+    high similarity floor and a length-plausibility check.
+    """
+    import difflib
+
+    if not quote or not quote.strip():
+        return None
+    text = doc.text
+    tokens = [t for t in _WS.split(quote.strip()) if t]
+    if not tokens:
+        return None
+
+    target_len = len(quote)
+    window = int(target_len * 1.6) + 40
+    best: tuple[float, int, int] | None = None
+
+    for anchor in _anchor_candidates(tokens):
+        pattern = re.compile(r"\s+".join(re.escape(t) for t in anchor), re.IGNORECASE)
+        for match in pattern.finditer(text):
+            lo = max(0, match.start() - window)
+            hi = min(len(text), match.start() + window)
+            region = text[lo:hi]
+            matcher = difflib.SequenceMatcher(None, region, quote, autojunk=False)
+            # Derive BOTH bounds from the alignment, so a document phrase that is
+            # longer than the model's quote ("forty-five (45) days" vs "45 days")
+            # is not truncated.
+            blocks = [b for b in matcher.get_matching_blocks() if b.size >= 4]
+            if not blocks:
+                continue
+            start = lo + blocks[0].a
+            end = lo + blocks[-1].a + blocks[-1].size
+            candidate = text[start:end]
+            if not candidate.strip():
+                continue
+            if not (0.5 * target_len <= len(candidate) <= 2.0 * target_len):
+                continue
+            ratio = difflib.SequenceMatcher(None, candidate, quote,
+                                            autojunk=False).ratio()
+            if ratio >= threshold and (best is None or ratio > best[0]):
+                best = (ratio, start, end)
+
+    if best is None:
+        return None
+    _, start, end = best
+    return Span(doc_id=doc.id, char_start=start, char_end=end, quote=text[start:end])
+
+
+def locate(doc: Document, quote: str) -> tuple[Span | None, str]:
+    """Exact -> whitespace-insensitive -> fuzzy. Returns (span, how)."""
+    span = find_span(doc, quote)
+    if span is not None:
+        return span, "exact" if span.quote == quote else "whitespace"
+    span = find_span_fuzzy(doc, quote)
+    return (span, "fuzzy") if span is not None else (None, "dropped")

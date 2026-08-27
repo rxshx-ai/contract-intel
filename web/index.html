@@ -74,9 +74,11 @@ const money = (n) => n == null ? "—" : n.toLocaleString(undefined, {maximumFra
 async function boot() {
   const s = await j("/portfolio/stats");
   $("stats").innerHTML =
-    `as of <b>${s.today}</b> · ${s.contracts} contracts / ${s.documents} documents · ` +
+    `as of <b>${s.today}</b> · model <b>${esc(s.model)}</b> · ${s.contracts} contracts / ${s.documents} documents · ` +
     `<b>${s.grounded_claims}</b> grounded claims · ${s.discarded_ungrounded} discarded · ` +
-    `grounding <b class="ok">${(s.grounding_rate*100).toFixed(1)}%</b> · ` +
+    `grounding <b class="ok">${(s.grounding_rate*100).toFixed(1)}%</b> ` +
+    `(${s.span_provenance.exact} exact, ${s.span_provenance.reflowed} reflowed, ` +
+    `${s.span_provenance.realigned} realigned, ${s.span_provenance.discarded} discarded) · ` +
     `hallucination rate <b class="ok">${s.hallucination_rate}</b> (by construction) · ` +
     `${s.findings} findings · <span class="crit">${s.injections_detected} injections</span> · ` +
     `committed spend ${money(s.committed_annual_value)}`;

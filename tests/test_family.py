@@ -26,8 +26,8 @@ def family(northwind, amendment2, order_form):
                       (amendment2, "amendment_2_northwind.json"),
                       (order_form, "order_form_northwind.json")):
         raw = RawExtraction.model_validate_json((FIXTURES / name).read_text())
-        claims, dropped = ground_clauses(raw, doc, "k_nw")
-        assert dropped == 0
+        claims, stats = ground_clauses(raw, doc, "k_nw")
+        assert stats.dropped == 0
         claims_by_doc[doc.id] = claims
     claims, lineage = resolve_supersession(claims_by_doc, docs)
     return docs, claims, lineage
