@@ -19,6 +19,7 @@ from datetime import date, timedelta
 from api.schemas import Contract, Obligation, TemporalRule
 
 DEFAULT_HORIZON_DAYS = 730
+MAX_OCCURRENCES_PER_RULE = 4
 
 
 def add_months(start: date, months: int) -> date:
@@ -131,6 +132,7 @@ def materialize(
     initial_term_months: int = 12,
     renewal_months: int | None = None,
     horizon_days: int = DEFAULT_HORIZON_DAYS,
+    max_occurrences: int = MAX_OCCURRENCES_PER_RULE,
 ) -> tuple[list[Obligation], list[str]]:
     """Turn temporal rules into dated obligations.
 
@@ -173,7 +175,8 @@ def materialize(
         # phantom deadlines just because it references a month end.
         if recurrence is None and rule.kind == "report":
             recurrence = _IMPLIED_RECURRENCE.get(rule.anchor)
-        occurrences = _occurrences(anchor_date, rule.offset_days, recurrence, today, horizon)
+        occurrences = _occurrences(
+            anchor_date, rule.offset_days, recurrence, today, horizon)[:max_occurrences]
 
         for due in occurrences:
             steps = list(term_steps)

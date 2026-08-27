@@ -38,11 +38,19 @@ MAX_INPUT_CHARS = 380_000   # ~120k tokens, under the 131k window
 # tiny request. Override once on a paid tier.
 TPM_LIMIT = int(os.environ.get("GROQ_TPM_LIMIT", "8000"))
 TPM_HEADROOM = 0.92         # leave slack for tokenizer estimate error
-MAX_OUTPUT_TOKENS = int(os.environ.get("GROQ_MAX_OUTPUT", "4500"))
+MAX_OUTPUT_TOKENS = int(os.environ.get("GROQ_MAX_OUTPUT", "5500"))
 
 
 class ExtractionUnavailable(RuntimeError):
     """No credentials, no cache, or the model could not produce valid output."""
+
+
+class OutputTruncated(ExtractionUnavailable):
+    """The extraction did not fit in the output budget.
+
+    Recoverable: the caller can split the chunk and retry. Distinct from a
+    generic failure precisely so that recovery is possible.
+    """
 
 
 class TokenBudget:
@@ -204,9 +212,9 @@ def complete_json(
     content = completion.choices[0].message.content or ""
     finish = completion.choices[0].finish_reason
     if finish == "length":
-        raise ExtractionUnavailable(
-            f"Model hit the {max_tokens:,}-token output cap mid-extraction. The "
-            f"result would be truncated, so it is rejected rather than used."
+        raise OutputTruncated(
+            f"Extraction exceeded the {max_tokens:,}-token output budget. "
+            f"Truncated output is rejected, never used."
         )
     try:
         return output_model.model_validate_json(content)
@@ -242,11 +250,11 @@ def _create_with_retry(*, model, messages, response_format, temperature,
             time.sleep(delay)
         except groq.BadRequestError as exc:
             if "json_validate_failed" in str(exc):
-                raise ExtractionUnavailable(
-                    "The model could not produce JSON matching the schema. This "
-                    "is almost always output truncation: the extraction did not "
-                    "fit in max_tokens. Reduce api.chunking.DEFAULT_MAX_CHARS or "
-                    "raise GROQ_MAX_OUTPUT."
+                # Constrained decoding that runs out of room fails validation
+                # rather than reporting finish_reason=length.
+                raise OutputTruncated(
+                    "Model output did not match the schema, usually because the "
+                    "extraction ran out of output budget mid-object."
                 ) from exc
             raise
         except groq.APIStatusError as exc:

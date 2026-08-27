@@ -1,5 +1,6 @@
 """End-to-end through the HTTP surface."""
 
+import pathlib
 from datetime import date
 
 import pytest
@@ -127,6 +128,21 @@ def test_upload_reports_firewall_verdict(client):
     clean = open("contracts/nda_helios.txt", "rb").read()
     body = client.post("/documents",
                        files={"file": ("nda.txt", clean, "text/plain")}).json()
+    assert body["firewall"]["quarantined"] is False
+
+
+def test_pdf_upload_is_ingested_from_a_flushed_file(client):
+    """Regression: ingesting inside the NamedTemporaryFile block read a
+    half-written buffer and failed with "No /Root object!"."""
+    pdf = pathlib.Path("contracts/meridian_msa.pdf")
+    if not pdf.exists():
+        pytest.skip("run eval/make_test_contract.py first")
+    body = client.post("/documents",
+                       files={"file": ("meridian.pdf", pdf.read_bytes(),
+                                       "application/pdf")}).json()
+    assert body["contract_type"] == "msa"
+    assert body["pages"] == 4
+    assert body["chars"] > 5000
     assert body["firewall"]["quarantined"] is False
 
 

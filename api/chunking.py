@@ -94,3 +94,28 @@ def chunk_document(
 def estimate_tokens(text: str) -> int:
     """Legal English tokenizes densely (numbers, parentheses, capitals)."""
     return int(len(text) / 3.4) + 1
+
+
+def split_chunk(chunk: Chunk) -> list[Chunk]:
+    """Halve a chunk at the nearest structural boundary.
+
+    Used when an extraction overflows the output budget: rather than failing,
+    the caller retries on smaller pieces. Absolute offsets are preserved, so
+    spans found in a half still resolve against the full document.
+    """
+    text = chunk.text
+    if len(text) < 400:
+        return [chunk]
+
+    midpoint = len(text) // 2
+    candidates = [m.start() for m in _HEADING.finditer(text)]
+    candidates += [m.start() for m in re.finditer(r"\n\n", text)]
+    interior = [c for c in candidates if 0.2 * len(text) < c < 0.8 * len(text)]
+    cut = min(interior, key=lambda c: abs(c - midpoint)) if interior else midpoint
+
+    return [
+        Chunk(text=text[:cut], start=chunk.start, end=chunk.start + cut,
+              index=chunk.index, total=chunk.total),
+        Chunk(text=text[cut:], start=chunk.start + cut, end=chunk.end,
+              index=chunk.index, total=chunk.total),
+    ]

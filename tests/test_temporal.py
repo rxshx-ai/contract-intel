@@ -186,3 +186,19 @@ def test_quarter_and_month_ends_are_calendar_correct():
     assert next_month_end(date(2026, 12, 5)) == date(2026, 12, 31)
     assert next_quarter_end(date(2026, 8, 27)) == date(2026, 9, 30)
     assert next_quarter_end(date(2026, 10, 1)) == date(2026, 12, 31)
+
+
+def test_one_recurring_rule_cannot_flood_the_calendar():
+    """A monthly rule over a 2-year horizon must not emit 24 rows."""
+    obs, _ = materialize(
+        [_rule(kind="report", anchor="month_end", offset_days=10, recurrence="P1M")],
+        _contract(), date(2026, 8, 27), renewal_months=12, horizon_days=730)
+    assert len(obs) <= 4
+    assert obs == sorted(obs, key=lambda o: o.due_date)
+
+
+def test_occurrence_cap_is_configurable():
+    obs, _ = materialize(
+        [_rule(kind="report", anchor="quarter_end", offset_days=5, recurrence="P3M")],
+        _contract(), date(2026, 8, 27), renewal_months=12, max_occurrences=2)
+    assert len(obs) == 2

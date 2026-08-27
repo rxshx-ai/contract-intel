@@ -76,3 +76,32 @@ def test_quotes_from_any_chunk_ground_against_the_full_document(northwind):
 
 def test_token_estimate_is_conservative(northwind):
     assert estimate_tokens(northwind.text) > len(northwind.text) / 4
+
+
+# -- truncation recovery ---------------------------------------------------
+
+def test_split_chunk_halves_at_a_structural_boundary(northwind):
+    from api.chunking import split_chunk
+
+    chunk = chunk_document(northwind)[0]
+    halves = split_chunk(chunk)
+    assert len(halves) == 2
+    assert halves[0].text + halves[1].text == chunk.text
+    assert halves[0].start == chunk.start
+    assert halves[1].end == chunk.end
+
+
+def test_split_chunk_preserves_absolute_offsets(northwind):
+    """Spans found in a half must still resolve against the full document."""
+    from api.chunking import split_chunk
+
+    for chunk in chunk_document(northwind):
+        for half in split_chunk(chunk):
+            assert northwind.text[half.start:half.end] == half.text
+
+
+def test_tiny_chunks_are_not_split():
+    from api.chunking import Chunk, split_chunk
+
+    tiny = Chunk(text="short clause", start=0, end=12, index=0, total=1)
+    assert split_chunk(tiny) == [tiny]

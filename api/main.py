@@ -7,6 +7,7 @@ routes.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from datetime import date
 from pathlib import Path
@@ -28,6 +29,19 @@ from api.schemas import OurRole
 
 def llm_model() -> str:
     return llm_model_name
+
+
+def _spill(raw: bytes) -> str:
+    """Write upload bytes to a real file and CLOSE it.
+
+    pdfplumber reads from the path, so the buffer must be flushed first --
+    ingesting inside the NamedTemporaryFile block yields "No /Root object!"
+    on a file that is still half in memory.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(raw)
+        tmp.flush()
+        return tmp.name
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,15 +97,16 @@ async def upload_document(file: UploadFile = File(...)):
     from api.firewall import inspect
 
     raw = await file.read()
-    suffix = Path(file.filename or "upload").suffix.lower()
-    if suffix == ".pdf":
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(raw)
-            tmp_path = tmp.name
-        doc = ingest_pdf(tmp_path, file.filename)
-        report = inspect(doc, tmp_path)
+    name = file.filename or "upload.txt"
+    if name.lower().endswith(".pdf"):
+        tmp_path = _spill(raw)
+        try:
+            doc = ingest_pdf(tmp_path, name)
+            report = inspect(doc, tmp_path)
+        finally:
+            os.unlink(tmp_path)
     else:
-        doc = ingest_text(raw.decode("utf-8", errors="replace"), file.filename or "upload.txt")
+        doc = ingest_text(raw.decode("utf-8", errors="replace"), name)
         report = inspect(doc)
 
     db.save_document(_conn, TENANT, doc)
@@ -123,10 +138,9 @@ async def create_contract(
         raw = await upload.read()
         name = upload.filename or "upload.txt"
         if name.lower().endswith(".pdf"):
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                tmp.write(raw)
-                doc = ingest_pdf(tmp.name, name)
-                paths[doc.id] = tmp.name
+            tmp_path = _spill(raw)
+            doc = ingest_pdf(tmp_path, name)
+            paths[doc.id] = tmp_path
         else:
             doc = ingest_text(raw.decode("utf-8", errors="replace"), name)
         docs.append(doc)
@@ -145,6 +159,12 @@ async def create_contract(
             status_code=502,
             detail=f"Extraction failed against {llm_model()}: {exc}",
         )
+    finally:
+        for tmp_path in paths.values():
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     _state["bundles"] = [b for b in _state["bundles"]
                          if b.contract.id != bundle.contract.id] + [bundle]
