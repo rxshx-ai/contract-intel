@@ -392,6 +392,14 @@ curl localhost:8077/system                  # what this process is backed by
 Without a key the module is inert — every method is a no-op, so callers never
 branch on availability, and retrieval falls back to BM25 alone.
 
+**What is verified, and what is not.** The lexical half runs in the product
+today. The fusion path is driven in tests by a stub vector index, which covers
+the ranking merge, grounding of fused results, scope filtering, the
+`include` filter, fallback when the vector store returns nothing, and dropping
+ids the vector store does not recognise. What has **never executed** is the
+Pinecone HTTP call itself — no key has been available. Expect index creation
+and the first `/vectors/sync` to need debugging.
+
 **Is a vector DB warranted here?** Honestly, at 200 items for 4 contracts, no —
 BM25 answers in microseconds. At ~15,000 items for 300 contracts it is still not
 a scale problem. Vectors earn their place for *paraphrase recall*, not speed.
