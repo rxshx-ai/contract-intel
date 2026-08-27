@@ -1,0 +1,55 @@
+{
+  "counterparty_name": "Northwind Observability, Inc.",
+  "our_role": "buyer",
+  "effective_date_text": "1 March 2026",
+  "annual_value": 84000.0,
+  "currency": "USD",
+  "clauses": [
+    {
+      "clause_type": "effective_date",
+      "quote": "Effective Date: 1 March 2026",
+      "party_favored": "na",
+      "amount": null,
+      "currency": null,
+      "percent": null,
+      "days": null,
+      "months": null,
+      "uptime_percent": null,
+      "unilateral": false,
+      "survives_termination": false,
+      "note": "",
+      "confidence": 0.95
+    },
+    {
+      "clause_type": "term",
+      "quote": "Initial Term: 12 months",
+      "party_favored": "mutual",
+      "amount": null,
+      "currency": null,
+      "percent": null,
+      "days": null,
+      "months": 12,
+      "uptime_percent": null,
+      "unilateral": false,
+      "survives_termination": false,
+      "note": "",
+      "confidence": 0.95
+    },
+    {
+      "clause_type": "minimum_commitment",
+      "quote": "Annual Subscription Fee: USD 84,000",
+      "party_favored": "counterparty",
+      "amount": 84000.0,
+      "currency": "USD",
+      "percent": null,
+      "days": null,
+      "months": null,
+      "uptime_percent": null,
+      "unilateral": false,
+      "survives_termination": false,
+      "note": "",
+      "confidence": 0.95
+    }
+  ],
+  "temporal_rules": []
+}

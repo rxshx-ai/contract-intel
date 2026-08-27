@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+.cache/
+contract_intel.db
+.DS_Store

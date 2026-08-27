@@ -1,0 +1,46 @@
+MASTER SUBSCRIPTION AGREEMENT
+
+This Master Subscription Agreement is entered into as of 15 April 2026 by and between Contoso Systems Ltd. ("Contoso") and Acme Financial Group plc ("Client").
+
+1. TERM
+
+1.1 The initial term of this Agreement is twenty-four (24) months commencing on 1 May 2026.
+1.2 This Agreement shall renew for successive twelve (12) month terms unless Client gives written notice of non-renewal at least thirty (30) days prior to the end of the then-current term.
+
+2. FEES
+
+2.1 Client shall pay an annual subscription fee of USD 640,000, invoiced annually in advance.
+2.2 Client shall pay all undisputed invoices within thirty (30) days of the invoice date.
+
+3. SERVICE LEVELS
+
+3.1 Availability. Contoso warrants that the Platform will be available not less than 99.99% of the time in each calendar month.
+3.2 Service Credits. If availability falls below 99.99% in any calendar month, Client shall receive a service credit of fifteen percent (15%) of the monthly fee, applied automatically without requirement of a claim.
+3.3 Support. Contoso shall respond to priority-one incidents within one (1) hour, twenty-four hours per day, seven days per week.
+
+4. DATA PROTECTION
+
+4.1 Breach Notification. Contoso shall notify Client of any personal data breach without undue delay and in any event within twenty-four (24) hours of becoming aware of such breach.
+4.2 Data Deletion. Upon termination or upon Client's written request, Contoso shall securely delete all Client Data within thirty (30) days.
+4.3 Subprocessors. Contoso shall not engage any new subprocessor without providing Client thirty (30) days prior written notice and an opportunity to object.
+4.4 Audit. Client may audit Contoso's information security controls once per calendar year upon thirty (30) days written notice, at Client's expense.
+
+5. LIMITATION OF LIABILITY
+
+5.1 Contoso's total aggregate liability arising out of this Agreement shall not exceed five million dollars ($5,000,000).
+5.2 The limitation in Section 5.1 shall not apply to Contoso's indemnification obligations under Section 6 or to Contoso's breach of its data protection obligations under Section 4, which shall be unlimited.
+
+6. INDEMNIFICATION
+
+6.1 Contoso shall defend, indemnify and hold harmless Client against any third party claim alleging that the Platform infringes any intellectual property right.
+
+7. TERMINATION
+
+7.1 Either party may terminate this Agreement upon a material breach that remains uncured sixty (60) days after written notice.
+7.2 Client may terminate this Agreement for convenience upon ninety (90) days written notice.
+
+8. GENERAL
+
+8.1 Governing Law. This Agreement is governed by the laws of England and Wales.
+8.2 Assignment. Either party may assign this Agreement to a successor in connection with a merger or sale of all or substantially all of its assets upon written notice.
+8.3 Reporting. Contoso shall deliver a written service performance report to Client within ten (10) days of the end of each calendar month.

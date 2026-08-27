@@ -1,0 +1,96 @@
+{
+  "counterparty_name": "Helios Partners LLC",
+  "our_role": "mutual",
+  "effective_date_text": "3 February 2026",
+  "annual_value": null,
+  "currency": "USD",
+  "clauses": [
+    {
+      "clause_type": "confidentiality",
+      "quote": "The receiving party shall use the disclosing party's Confidential Information solely for the purpose of evaluating the potential business relationship and shall not disclose it to any third party.",
+      "party_favored": "mutual",
+      "amount": null,
+      "currency": null,
+      "percent": null,
+      "days": null,
+      "months": null,
+      "uptime_percent": null,
+      "unilateral": false,
+      "survives_termination": false,
+      "note": "",
+      "confidence": 0.95
+    },
+    {
+      "clause_type": "term",
+      "quote": "The obligations of this Agreement shall continue for a period of five (5) years from the date of disclosure.",
+      "party_favored": "mutual",
+      "amount": null,
+      "currency": null,
+      "percent": null,
+      "days": null,
+      "months": 60,
+      "uptime_percent": null,
+      "unilateral": false,
+      "survives_termination": false,
+      "note": "",
+      "confidence": 0.95
+    },
+    {
+      "clause_type": "data_retention_deletion",
+      "quote": "Upon written request, the receiving party shall return or destroy all Confidential Information within ten (10) days.",
+      "party_favored": "mutual",
+      "amount": null,
+      "currency": null,
+      "percent": null,
+      "days": 10,
+      "months": null,
+      "uptime_percent": null,
+      "unilateral": false,
+      "survives_termination": false,
+      "note": "",
+      "confidence": 0.95
+    },
+    {
+      "clause_type": "non_compete",
+      "quote": "For a period of twenty-four (24) months following the date of this Agreement, neither party shall solicit for employment any employee of the other party.",
+      "party_favored": "mutual",
+      "amount": null,
+      "currency": null,
+      "percent": null,
+      "days": null,
+      "months": 24,
+      "uptime_percent": null,
+      "unilateral": false,
+      "survives_termination": false,
+      "note": "",
+      "confidence": 0.95
+    },
+    {
+      "clause_type": "governing_law",
+      "quote": "This Agreement is governed by the laws of the State of New York.",
+      "party_favored": "na",
+      "amount": null,
+      "currency": null,
+      "percent": null,
+      "days": null,
+      "months": null,
+      "uptime_percent": null,
+      "unilateral": false,
+      "survives_termination": false,
+      "note": "New York",
+      "confidence": 0.95
+    }
+  ],
+  "temporal_rules": [
+    {
+      "kind": "expiry",
+      "anchor": "effective_date",
+      "offset_days": 1825,
+      "recurrence_months": null,
+      "condition": null,
+      "consequence": "Confidentiality obligations expire.",
+      "owed_by": "either",
+      "quote": "The obligations of this Agreement shall continue for a period of five (5) years from the date of disclosure."
+    }
+  ]
+}

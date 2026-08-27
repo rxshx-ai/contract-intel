@@ -1,0 +1,9 @@
+AMENDMENT NO. 2 TO MASTER SERVICES AGREEMENT
+
+This Amendment No. 2 (this "Amendment") is entered into as of 1 June 2026 by and between Northwind Observability, Inc. ("Provider") and Contoso Systems Ltd. ("Customer"), and amends that certain Master Services Agreement between the parties (the "Agreement").
+
+1. Section 11.1 of the Agreement is hereby deleted in its entirety and replaced with the following: "EXCEPT FOR THE EXCLUDED CLAIMS, EACH PARTY'S TOTAL AGGREGATE LIABILITY ARISING OUT OF THIS AGREEMENT SHALL NOT EXCEED TWO HUNDRED FIFTY THOUSAND DOLLARS ($250,000)."
+
+2. Section 3.2 of the Agreement is hereby amended to replace "forty-five (45) days" with "thirty (30) days".
+
+3. Except as expressly amended herein, the Agreement remains in full force and effect.

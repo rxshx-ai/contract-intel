@@ -1,0 +1,51 @@
+{
+  "counterparty_name": "Northwind Observability, Inc.",
+  "our_role": "buyer",
+  "effective_date_text": "1 June 2026",
+  "annual_value": null,
+  "currency": "USD",
+  "clauses": [
+    {
+      "clause_type": "limitation_of_liability",
+      "quote": "Section 11.1 of the Agreement is hereby deleted in its entirety and replaced with the following: \"EXCEPT FOR THE EXCLUDED CLAIMS, EACH PARTY'S TOTAL AGGREGATE LIABILITY ARISING OUT OF THIS AGREEMENT SHALL NOT EXCEED TWO HUNDRED FIFTY THOUSAND DOLLARS ($250,000).\"",
+      "party_favored": "counterparty",
+      "amount": 250000.0,
+      "currency": "USD",
+      "percent": null,
+      "days": null,
+      "months": null,
+      "uptime_percent": null,
+      "unilateral": false,
+      "survives_termination": false,
+      "note": "supersedes MSA Section 11.1",
+      "confidence": 0.95
+    },
+    {
+      "clause_type": "payment_terms",
+      "quote": "Section 3.2 of the Agreement is hereby amended to replace \"forty-five (45) days\" with \"thirty (30) days\".",
+      "party_favored": "us",
+      "amount": null,
+      "currency": null,
+      "percent": null,
+      "days": 30,
+      "months": null,
+      "uptime_percent": null,
+      "unilateral": false,
+      "survives_termination": false,
+      "note": "supersedes MSA Section 3.2",
+      "confidence": 0.95
+    }
+  ],
+  "temporal_rules": [
+    {
+      "kind": "payment",
+      "anchor": "invoice_date",
+      "offset_days": 30,
+      "recurrence_months": null,
+      "condition": null,
+      "consequence": "Payment due 30 days from invoice.",
+      "owed_by": "us",
+      "quote": "Section 3.2 of the Agreement is hereby amended to replace \"forty-five (45) days\" with \"thirty (30) days\"."
+    }
+  ]
+}

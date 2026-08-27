@@ -1,0 +1,188 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Contract Intelligence — test harness</title>
+<style>
+  /* Deliberately minimal. This is a test harness, not the product UI. */
+  body { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+         margin: 0; padding: 16px; background: #fff; color: #111; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  h2 { font-size: 13px; margin: 20px 0 6px; border-bottom: 1px solid #ccc;
+       padding-bottom: 3px; }
+  .muted { color: #666; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 8px; }
+  th, td { text-align: left; padding: 3px 8px 3px 0; vertical-align: top;
+           border-bottom: 1px solid #eee; }
+  th { font-weight: 600; color: #444; }
+  tr.click { cursor: pointer; }
+  tr.click:hover { background: #f4f4f4; }
+  .crit { color: #b00; font-weight: 600; }
+  .high { color: #c60; font-weight: 600; }
+  .med  { color: #886600; }
+  .low, .info { color: #666; }
+  .ok   { color: #070; }
+  blockquote { margin: 4px 0 4px 12px; padding-left: 8px; border-left: 2px solid #ccc;
+               color: #333; white-space: pre-wrap; }
+  pre { background: #f6f6f6; padding: 8px; overflow-x: auto; font-size: 12px; }
+  .bar { display: inline-block; height: 9px; background: #b00; vertical-align: middle; }
+  .cols { display: flex; gap: 24px; flex-wrap: wrap; }
+  .col { flex: 1 1 380px; min-width: 340px; }
+  button { font: inherit; padding: 2px 8px; margin-right: 6px; }
+  input { font: inherit; padding: 2px 4px; }
+  .strike { text-decoration: line-through; color: #999; }
+  details { margin: 3px 0; }
+  summary { cursor: pointer; }
+</style>
+
+<h1>Contract Risk &amp; Obligation Intelligence <span class="muted">— test harness</span></h1>
+<div class="muted" id="stats">loading…</div>
+
+<div class="cols">
+  <div class="col">
+    <h2>Portfolio</h2>
+    <table id="contracts"></table>
+
+    <h2>Upcoming deadlines (all contracts)</h2>
+    <table id="deadlines"></table>
+
+    <h2>Flow-down gaps (cross-contract)</h2>
+    <div id="gaps"></div>
+
+    <h2>Upload</h2>
+    <form id="up">
+      <input type="file" name="files" multiple>
+      <input type="text" name="title" placeholder="title" value="Uploaded contract">
+      <input type="text" name="counterparty" placeholder="counterparty">
+      <select name="our_role"><option>buyer</option><option>seller</option><option>mutual</option></select>
+      <button type="submit">Analyze</button>
+    </form>
+    <div id="upmsg" class="muted"></div>
+  </div>
+
+  <div class="col">
+    <h2 id="detail-title">Contract detail <span class="muted">— select a row</span></h2>
+    <div id="detail"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const j = (u, o) => fetch(u, o).then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)));
+const esc = (s) => String(s ?? "").replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+const sev = (s) => ({critical:"crit", high:"high", medium:"med", low:"low", info:"info"}[s] || "");
+const money = (n) => n == null ? "—" : n.toLocaleString(undefined, {maximumFractionDigits:0});
+
+async function boot() {
+  const s = await j("/portfolio/stats");
+  $("stats").innerHTML =
+    `as of <b>${s.today}</b> · ${s.contracts} contracts / ${s.documents} documents · ` +
+    `<b>${s.grounded_claims}</b> grounded claims · ${s.discarded_ungrounded} discarded · ` +
+    `grounding <b class="ok">${(s.grounding_rate*100).toFixed(1)}%</b> · ` +
+    `hallucination rate <b class="ok">${s.hallucination_rate}</b> (by construction) · ` +
+    `${s.findings} findings · <span class="crit">${s.injections_detected} injections</span> · ` +
+    `committed spend ${money(s.committed_annual_value)}`;
+
+  const cs = await j("/contracts");
+  $("contracts").innerHTML =
+    "<tr><th>Contract</th><th>Role</th><th>Value</th><th>Risk</th><th>Findings</th></tr>" +
+    cs.map(c => `<tr class="click" onclick="showContract('${c.id}')">
+      <td>${esc(c.title)}<br><span class="muted">${esc(c.counterparty)}</span></td>
+      <td>${c.our_role}</td><td>${money(c.annual_value)}</td>
+      <td class="${sev(c.band)}">${c.risk} ${c.band}
+        <span class="bar" style="width:${c.risk/2}px"></span></td>
+      <td>${c.findings}</td></tr>`).join("");
+
+  const ds = await j("/portfolio/deadlines?within_days=400");
+  $("deadlines").innerHTML =
+    "<tr><th>Due</th><th>In</th><th>Kind</th><th>Contract</th><th>Owed by</th></tr>" +
+    ds.slice(0, 14).map(d => `<tr><td>${d.due_date}</td>
+      <td class="${d.days_remaining < 30 ? 'crit' : d.days_remaining < 90 ? 'high' : ''}">${d.days_remaining}d</td>
+      <td>${d.kind}</td><td>${esc(d.contract)}</td><td>${d.owed_by}</td></tr>`).join("");
+
+  const g = await j("/portfolio/gaps");
+  $("gaps").innerHTML =
+    `<div class="muted">${g.summary.gap_count} gaps · ${g.summary.contracts_affected} customer contract(s) ·
+     ${money(g.summary.exposed_revenue)} revenue exposed · dimensions: ${g.summary.dimensions.join(", ")}</div>` +
+    g.gaps.map(x => `<details><summary class="${sev(x.severity)}">${esc(x.title)}</summary>
+      <pre>${esc(x.explanation)}</pre>
+      ${x.evidence.map(e => `<blockquote>${esc(e.quote)}</blockquote>`).join("")}
+    </details>`).join("");
+}
+
+async function showContract(id) {
+  const [c, cl, ob, rk, fi] = await Promise.all([
+    j(`/contracts/${id}`), j(`/contracts/${id}/clauses?effective_only=false`),
+    j(`/contracts/${id}/obligations`), j(`/contracts/${id}/risk`),
+    j(`/contracts/${id}/findings`),
+  ]);
+  $("detail-title").innerHTML = `Contract detail — ${esc(c.contract.title)}`;
+
+  const axes = rk.profile.axes.map(a =>
+    `<tr><td>${a.axis}</td><td class="${sev(rk.band)}">${a.score}
+      <span class="bar" style="width:${a.score/2}px"></span></td>
+     <td>${a.contributions.map(x => `+${x.points} ${esc(x.reason)}`).join("<br>") || "—"}</td></tr>`).join("");
+
+  const clauses = cl.map(x => `<tr class="${x.effective ? "" : "strike"}">
+      <td>${x.clause_type}${x.effective ? "" : " (superseded)"}</td>
+      <td>${x.party_favored}</td>
+      <td>${esc(JSON.stringify(x.fields))}</td>
+      <td><blockquote>${esc(x.span.quote.slice(0,220))}</blockquote>
+          <span class="muted">${esc(x.document)} p${x.page ?? "?"}
+          [${x.span.char_start}:${x.span.char_end}] · ${esc(x.lineage)}</span></td>
+    </tr>`).join("");
+
+  const obs = ob.obligations.map(o => `<details><summary>
+      <b>${o.due_date}</b> (${o.days_remaining}d) ${o.kind} — ${esc(o.description)}</summary>
+      <pre>${o.derivation.map(esc).join("\n")}</pre></details>`).join("")
+    + (ob.unresolved.length ? `<div class="muted">unresolved: ${ob.unresolved.map(esc).join("<br>")}</div>` : "");
+
+  const finds = fi.map(f => `<details><summary class="${sev(f.severity)}">
+      [${f.severity}] ${esc(f.title)} <span class="muted">(${f.kind})</span></summary>
+      <pre>${esc(f.explanation)}</pre>
+      ${f.evidence.length
+        ? f.evidence.map(e => `<blockquote>${esc(e.quote)}</blockquote>`).join("")
+        : '<span class="muted">no evidence span — this finding asserts ABSENCE</span>'}
+    </details>`).join("");
+
+  $("detail").innerHTML = `
+    <div class="muted">${c.documents.map(d => esc(d.filename)).join(" + ")} ·
+      effective ${c.contract.effective_date ?? "?"} · grounding ${(c.grounding_rate*100).toFixed(1)}% ·
+      ${c.dropped_claims} discarded</div>
+    <h2>Risk (overall ${rk.overall} — worst axis, not mean)</h2>
+    <table><tr><th>Axis</th><th>Score</th><th>Contributions</th></tr>${axes}</table>
+    <h2>Obligations (${ob.obligations.length})</h2>${obs}
+    <h2>Findings (${fi.length})</h2>${finds}
+    <h2>Clauses (${cl.length})</h2>
+    <table><tr><th>Type</th><th>Favors</th><th>Fields</th><th>Quote &amp; provenance</th></tr>${clauses}</table>
+    <h2>Exit cost</h2>
+    <input type="date" id="exitdate" value="2026-10-01">
+    <button onclick="exitCost('${c.contract.id}')">Compute</button>
+    <div id="exitout"></div>
+    <h2>Raw</h2>
+    <details><summary>AnalysisResult JSON</summary><pre>${esc(JSON.stringify(c, null, 2))}</pre></details>`;
+}
+
+async function exitCost(id) {
+  const fd = new FormData();
+  fd.append("exit_date", $("exitdate").value);
+  const c = await j(`/contracts/${id}/termination-cost`, {method: "POST", body: fd});
+  $("exitout").innerHTML =
+    "<table>" + c.line_items.map(i =>
+      `<tr><td>${esc(i.label)}</td><td>${money(i.amount)}</td></tr>`).join("") +
+    `<tr><th>TOTAL</th><th>${money(c.total)} ${c.currency}</th></tr></table>` +
+    `<div class="muted">${c.notes.map(esc).join("<br>")}</div>`;
+}
+
+$("up").onsubmit = async (e) => {
+  e.preventDefault();
+  $("upmsg").textContent = "analyzing…";
+  try {
+    const r = await j("/contracts", {method: "POST", body: new FormData(e.target)});
+    $("upmsg").textContent = `ok: ${r.clauses.length} clauses, ${r.findings.length} findings`;
+    boot();
+  } catch (err) {
+    $("upmsg").innerHTML = `<span class="crit">${esc(err.detail || err)}</span>`;
+  }
+};
+
+boot();
+</script>

@@ -1,0 +1,10 @@
+ORDER FORM
+
+Provider: Northwind Observability, Inc.
+Customer: Contoso Systems Ltd.
+Effective Date: 1 March 2026
+Initial Term: 12 months
+Annual Subscription Fee: USD 84,000
+Billing Frequency: Annual, in advance
+
+This Order Form is governed by the Master Services Agreement between the parties.

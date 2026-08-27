@@ -1,0 +1,82 @@
+MASTER SERVICES AGREEMENT
+
+This Master Services Agreement (the "Agreement") is entered into as of the Effective Date by and between Northwind Observability, Inc., a Delaware corporation ("Provider"), and Contoso Systems Ltd. ("Customer").
+
+1. DEFINITIONS
+
+1.1 "Effective Date" means the date set forth on the Order Form executed by the parties.
+1.2 "Services" means the observability and monitoring platform made available by Provider.
+1.3 "Confidential Information" means all non-public information disclosed by either party.
+
+2. TERM AND RENEWAL
+
+2.1 Initial Term. This Agreement shall commence on the Effective Date and continue for an initial period of twelve (12) months (the "Initial Term").
+
+2.2 Renewal. This Agreement shall automatically renew for successive twelve (12) month periods unless either party provides written notice of non-renewal no less than sixty (60) days prior to the end of the then-current Term.
+
+3. FEES AND PAYMENT
+
+3.1 Fees. Customer shall pay the fees set forth in the applicable Order Form. Fees are non-refundable.
+3.2 Payment. Customer shall pay all undisputed invoices within forty-five (45) days of the invoice date.
+3.3 Price Adjustment. Provider may increase fees by up to seven percent (7%) upon each renewal, effective upon written notice to Customer.
+3.4 Late Payment. Overdue amounts accrue interest at 1.5% per month.
+
+4. TERMINATION
+
+4.1 Termination for Convenience. Provider may terminate this Agreement at any time upon thirty (30) days written notice to Customer. Customer shall have no corresponding right of termination for convenience.
+4.2 Termination for Cause. Either party may terminate this Agreement upon a material breach by the other party that remains uncured thirty (30) days after written notice of such breach.
+4.3 Early Termination Fee. If Customer terminates this Agreement for any reason other than Provider's uncured material breach, Customer shall pay an early termination fee equal to fifty percent (50%) of the remaining fees for the then-current Term.
+
+5. SERVICE LEVELS
+
+5.1 Availability. Provider will use commercially reasonable efforts to make the Services available 99.9% of the time in each calendar month, excluding scheduled maintenance.
+5.2 Service Credits. If availability falls below 99.9% in a calendar month, Customer may request a service credit equal to ten percent (10%) of the monthly fee. Customer must submit any such request in writing within thirty (30) days of the end of the affected month, failing which the claim is waived.
+5.3 Support. Provider will acknowledge priority-one support requests within four (4) business hours.
+
+6. DATA PROTECTION
+
+6.1 Security. Provider shall maintain commercially reasonable administrative, physical and technical safeguards.
+6.2 Breach Notification. Provider shall notify Customer of any confirmed breach of Customer Data without undue delay and in any event within seventy-two (72) hours of becoming aware of such breach.
+6.3 Data Deletion. Upon termination, Provider shall delete Customer Data within ninety (90) days of Customer's written request.
+6.4 Subprocessors. Provider may engage subprocessors in its sole discretion and shall maintain a list of such subprocessors on its website.
+
+7. AUDIT
+
+7.1 Provider may audit Customer's use of the Services upon ten (10) days notice, not more than twice per calendar year, to verify compliance with usage limits. Customer shall provide reasonable cooperation at Customer's expense.
+
+8. INTELLECTUAL PROPERTY
+
+8.1 Provider retains all right, title and interest in the Services. Customer retains all right, title and interest in Customer Data.
+8.2 Feedback. Customer grants Provider a perpetual, irrevocable, worldwide, royalty-free license to use any feedback provided by Customer.
+
+9. CONFIDENTIALITY
+
+9.1 Each party shall protect the other's Confidential Information using no less than reasonable care. The obligations in this Section 9 shall survive termination of this Agreement indefinitely.
+
+10. WARRANTY
+
+10.1 EXCEPT AS EXPRESSLY SET FORTH HEREIN, THE SERVICES ARE PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND.
+
+11. LIMITATION OF LIABILITY
+
+11.1 EXCEPT FOR THE EXCLUDED CLAIMS, EACH PARTY'S TOTAL AGGREGATE LIABILITY ARISING OUT OF THIS AGREEMENT SHALL NOT EXCEED FIFTY THOUSAND DOLLARS ($50,000).
+
+11.2 Excluded Claims. The limitation in Section 11.1 shall not apply to Customer's indemnification obligations under Section 12, Customer's breach of Section 9 (Confidentiality), or Customer's payment obligations, which shall be unlimited.
+
+11.3 NEITHER PARTY SHALL BE LIABLE FOR INDIRECT, INCIDENTAL OR CONSEQUENTIAL DAMAGES.
+
+12. INDEMNIFICATION
+
+12.1 Customer shall defend, indemnify and hold harmless Provider from any claim arising out of Customer's use of the Services, Customer Data, or breach of this Agreement. This obligation shall survive termination of this Agreement without limitation of time.
+
+13. INSURANCE
+
+13.1 Customer shall maintain commercial general liability insurance of not less than $2,000,000 and shall provide a certificate of insurance to Provider annually on each anniversary of the Effective Date.
+
+14. GENERAL
+
+14.1 Amendment. Provider may modify the terms of this Agreement at any time by posting an updated version to its website. Continued use of the Services constitutes acceptance of the modified terms.
+14.2 Assignment. Customer may not assign this Agreement, including by operation of law or in connection with a change of control, without Provider's prior written consent. Provider may assign freely.
+14.3 Governing Law. This Agreement shall be governed by the laws of the State of Delaware, without regard to conflict of laws principles.
+14.4 Venue. The parties submit to the exclusive jurisdiction of the state and federal courts located in Wilmington, Delaware.
+14.5 Reporting. Customer shall provide Provider with a quarterly usage report within fifteen (15) days of the end of each calendar quarter.
