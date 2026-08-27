@@ -1,0 +1,70 @@
+{
+  "counterparty_name": "Northwind Observability, Inc.",
+  "our_role": "customer",
+  "effective_date_text": "1 March 2026",
+  "annual_value": 84000.0,
+  "currency": "USD",
+  "clauses": [
+    {
+      "clause_type": "effective_date",
+      "quote": "Effective Date: 1 March 2026",
+      "party_favored": "mutual",
+      "amount": null,
+      "currency": null,
+      "percent": null,
+      "days": null,
+      "months": null,
+      "uptime_percent": null,
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
+      "confidence": null
+    },
+    {
+      "clause_type": "term",
+      "quote": "Initial Term: 12 months",
+      "party_favored": "mutual",
+      "amount": null,
+      "currency": null,
+      "percent": null,
+      "days": null,
+      "months": 12,
+      "uptime_percent": null,
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
+      "confidence": null
+    },
+    {
+      "clause_type": "payment_terms",
+      "quote": "Annual Subscription Fee: USD 84,000",
+      "party_favored": "counterparty",
+      "amount": 84000.0,
+      "currency": "USD",
+      "percent": null,
+      "days": null,
+      "months": null,
+      "uptime_percent": null,
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
+      "confidence": null
+    },
+    {
+      "clause_type": "governing_law",
+      "quote": "This Order Form is governed by the Master Services Agreement between the parties.",
+      "party_favored": "mutual",
+      "amount": null,
+      "currency": null,
+      "percent": null,
+      "days": null,
+      "months": null,
+      "uptime_percent": null,
+      "unilateral": null,
+      "survives_termination": null,
+      "note": null,
+      "confidence": null
+    }
+  ],
+  "temporal_rules": []
+}

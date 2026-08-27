@@ -1,0 +1,40 @@
+{
+  "counterparty_name": "Northwind Observability, Inc.",
+  "our_role": "Customer",
+  "effective_date_text": "1 June 2026",
+  "annual_value": null,
+  "currency": "USD",
+  "clauses": [
+    {
+      "clause_type": "limitation_of_liability",
+      "quote": "\"EXCEPT FOR THE EXCLUDED CLAIMS, EACH PARTY'S TOTAL AGGREGATE LIABILITY ARISING OUT OF THIS AGREEMENT SHALL NOT EXCEED TWO HUNDRED FIFTY THOUSAND DOLLARS ($250,000).\"",
+      "party_favored": "mutual",
+      "amount": 250000.0,
+      "currency": "USD",
+      "percent": null,
+      "days": null,
+      "months": null,
+      "uptime_percent": null,
+      "unilateral": false,
+      "survives_termination": null,
+      "note": "limitation_of_liability",
+      "confidence": null
+    },
+    {
+      "clause_type": "notice_period",
+      "quote": "Section 3.2 of the Agreement is hereby amended to replace \"forty-five (45) days\" with \"thirty (30) days\".",
+      "party_favored": "mutual",
+      "amount": null,
+      "currency": null,
+      "percent": null,
+      "days": 30,
+      "months": null,
+      "uptime_percent": null,
+      "unilateral": false,
+      "survives_termination": null,
+      "note": "notice_period",
+      "confidence": null
+    }
+  ],
+  "temporal_rules": []
+}

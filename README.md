@@ -5,15 +5,19 @@ ungrounded output cannot reach the screen**.
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python eval/make_fixtures.py --seed-cache   # seed the offline demo
+.venv/bin/python eval/seed_cache.py                   # install the shipped extractions
+.venv/bin/python -m pytest tests/ -q                  # 237 tests, no network needed
 .venv/bin/python eval/demo_run.py                     # the five demo beats
 .venv/bin/uvicorn api.main:app --reload --port 8077   # then open localhost:8077
 ```
 
+`demo_cache/` holds **real `openai/gpt-oss-120b` output** for the six demo
+documents, committed so a clone runs the whole product — analysis, calendar,
+retrieval, agent — with no API key. The live cache stays untracked, because it
+fills with extractions of whatever you upload and those are your documents.
+
 No API key is needed for the demo — extractions are cached by document hash.
-The cache ships with **real `gpt-oss-120b` output** for all six documents, so
-the demo is live extraction, not fixtures. To re-extract or analyze new
-documents:
+To analyse new documents, or re-extract the corpus:
 
 ```bash
 export GROQ_API_KEY=gsk_...
