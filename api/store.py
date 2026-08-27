@@ -43,22 +43,24 @@ def is_postgres() -> bool:
 
 _TABLES = """
 CREATE TABLE IF NOT EXISTS documents (
-    id           TEXT PRIMARY KEY,
+    id           TEXT NOT NULL,
     tenant_id    TEXT NOT NULL,
     contract_id  TEXT,
     filename     TEXT NOT NULL,
     sha256       TEXT NOT NULL,
     payload      TEXT NOT NULL,
-    created_at   TEXT NOT NULL
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, id)
 );
 CREATE TABLE IF NOT EXISTS contracts (
-    id           TEXT PRIMARY KEY,
+    id           TEXT NOT NULL,
     tenant_id    TEXT NOT NULL,
     title        TEXT NOT NULL,
     counterparty TEXT,
     our_role     TEXT,
     payload      TEXT NOT NULL,
-    created_at   TEXT NOT NULL
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, id)
 );
 CREATE TABLE IF NOT EXISTS audit_log (
     id           {serial},
@@ -107,6 +109,12 @@ class Store:
     # any index is created.
     _ADDED_COLUMNS = [("documents", "contract_id", "TEXT")]
 
+    # An id alone was the primary key, so two tenants could never hold the same
+    # contract id -- and one tenant's write silently displaced another's. That
+    # is how a contract vanished from the running service after the test suite
+    # ran against the same database.
+    _COMPOSITE_KEY = ["contracts", "documents"]
+
     def _migrate(self) -> None:
         serial = ("BIGSERIAL PRIMARY KEY" if self.postgres
                   else "INTEGER PRIMARY KEY AUTOINCREMENT")
@@ -120,6 +128,8 @@ class Store:
         for table, column, coltype in self._ADDED_COLUMNS:
             if column not in self._columns(table):
                 self._raw(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+        for table in self._COMPOSITE_KEY:
+            self._ensure_composite_key(table)
         for statement in indexes:
             self._raw(statement)
 
@@ -130,6 +140,43 @@ class Store:
         else:
             self.conn.execute(statement)
             self.conn.commit()
+
+    def _ensure_composite_key(self, table: str) -> None:
+        """Migrate a single-column primary key to (tenant_id, id)."""
+        if self.postgres:
+            rows = self.query(
+                "SELECT a.attname FROM pg_index i "
+                "JOIN pg_attribute a ON a.attrelid = i.indrelid "
+                "                   AND a.attnum = ANY(i.indkey) "
+                "WHERE i.indrelid = %s::regclass AND i.indisprimary", (table,))
+            key = {r["attname"] for r in rows}
+            if key == {"id"}:
+                self._raw(f"ALTER TABLE {table} DROP CONSTRAINT {table}_pkey")
+                self._raw(f"ALTER TABLE {table} ADD PRIMARY KEY (tenant_id, id)")
+            return
+
+        # SQLite cannot alter a primary key, so the table is rebuilt.
+        rows = self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+        key = {r[1] for r in rows if r[5]}
+        if key != {"id"}:
+            return
+        columns = ", ".join(r[1] for r in rows)
+        self.conn.executescript(
+            f"ALTER TABLE {table} RENAME TO {table}_old;")
+        self._migrate_create_only(table)
+        self.conn.executescript(
+            f"INSERT INTO {table} ({columns}) SELECT {columns} FROM {table}_old;"
+            f"DROP TABLE {table}_old;")
+        self.conn.commit()
+
+    def _migrate_create_only(self, table: str) -> None:
+        serial = ("BIGSERIAL PRIMARY KEY" if self.postgres
+                  else "INTEGER PRIMARY KEY AUTOINCREMENT")
+        for statement in _TABLES.format(serial=serial).split(";"):
+            statement = statement.strip()
+            if statement.upper().startswith("CREATE TABLE") and \
+                    f" {table} " in statement:
+                self._raw(statement)
 
     def _columns(self, table: str) -> set[str]:
         if self.postgres:
@@ -165,8 +212,8 @@ class Store:
     # ---- documents -----------------------------------------------------
 
     def save_document(self, doc, contract_id: str | None = None) -> None:
-        self.execute(
-            "DELETE FROM documents WHERE id = ?", (doc.id,))
+        self.execute("DELETE FROM documents WHERE tenant_id = ? AND id = ?",
+                     (self.tenant, doc.id))
         self.execute(
             "INSERT INTO documents (id, tenant_id, contract_id, filename, sha256, "
             "payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -183,7 +230,10 @@ class Store:
     # ---- contracts -----------------------------------------------------
 
     def save_contract(self, contract, payload: str) -> None:
-        self.execute("DELETE FROM contracts WHERE id = ?", (contract.id,))
+        # Scoped by tenant: deleting by id alone would reach into another
+        # tenant's row, which is the isolation bug this schema exists to avoid.
+        self.execute("DELETE FROM contracts WHERE tenant_id = ? AND id = ?",
+                     (self.tenant, contract.id))
         self.execute(
             "INSERT INTO contracts (id, tenant_id, title, counterparty, our_role, "
             "payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",

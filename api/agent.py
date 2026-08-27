@@ -148,6 +148,14 @@ RULES
   usually work. If the tools do not answer it, call `finish` with
   sufficient=false and say what is missing.
 - Numbers and dates in tool results were computed by code. Repeat them exactly.
+- Contract arguments accept a name or an id: "Northwind" works. If a lookup
+  reports no match it also lists what exists -- use that rather than telling
+  the user the contract is absent.
+- Direction matters. "Our provider / supplier / vendor" means contracts where
+  WE BUY (their obligation to us); "our customer / client" means contracts
+  where WE SELL (our obligation to them). `compare` labels every row with
+  `we_are`. Do not scope a comparison to one contract unless the question names
+  it -- compare across all of them and then report the relevant side.
 - A contract that does not state something is not the same as a good value.
   Say when a contract is silent; `compare` reports this as `not_stated`.
 - Cite the record ids (`record_id`, or `id` on search hits) behind every claim.
@@ -186,9 +194,43 @@ class Agent:
         self.today = today
         self.by_id = dict(retriever.by_id)
 
+    # ---- identifiers ---------------------------------------------------
+
+    def resolve_contract(self, value: str | None) -> str | None:
+        """Accept an id OR a name.
+
+        The model reaches for "Northwind" far more readily than
+        "k_northwind", and a filter that silently matches nothing makes it
+        conclude the contract does not exist -- which it then reports to the
+        user as fact. Matching leniently is the difference between a right
+        answer and a confident wrong one.
+        """
+        if not value:
+            return None
+        wanted = value.strip().lower()
+        for bundle in self.bundles:
+            if bundle.contract.id.lower() == wanted:
+                return bundle.contract.id
+        for bundle in self.bundles:
+            name = (bundle.contract.counterparty or bundle.contract.title).lower()
+            if wanted in name or name.startswith(wanted):
+                return bundle.contract.id
+        for bundle in self.bundles:
+            haystack = f"{bundle.contract.id} {bundle.contract.counterparty} " \
+                       f"{bundle.contract.title}".lower()
+            if any(tok in haystack for tok in wanted.split() if len(tok) > 3):
+                return bundle.contract.id
+        return None
+
+    def _known_contracts(self) -> list[dict[str, str]]:
+        return [{"contract_id": b.contract.id,
+                 "party": b.contract.counterparty or b.contract.title}
+                for b in self.bundles]
+
     # ---- tool implementations -----------------------------------------
 
     def _tool_search(self, query: str, contract_id: str | None = None):
+        contract_id = self.resolve_contract(contract_id)
         hits = self.retriever.search(query or "", k=6, contract_id=contract_id)
         for hit in hits:
             self.by_id.setdefault(hit.id, hit.payload)
@@ -197,7 +239,10 @@ class Agent:
     def _tool_compare(self, dimension: str, contract_ids=None):
         from api.compare import compare
 
-        result = compare(self.bundles, dimension, contract_ids)
+        if contract_ids:
+            contract_ids = [cid for cid in
+                            (self.resolve_contract(c) for c in contract_ids) if cid]
+        result = compare(self.bundles, dimension, contract_ids or None)
         if result.get("ok"):
             for row in result["rows"]:
                 item = self.by_id.get(row["record_id"])
@@ -217,6 +262,7 @@ class Agent:
         from api.pipeline import upcoming_deadlines
 
         rows = upcoming_deadlines(self.bundles, self.today, within_days or 365)
+        contract_id = self.resolve_contract(contract_id)
         if contract_id:
             rows = [r for r in rows if r["contract_id"] == contract_id]
         return {"deadlines": [
@@ -232,6 +278,7 @@ class Agent:
         lo = date.fromisoformat(start) if start else None
         hi = date.fromisoformat(end) if end else None
         events = in_range(events, lo, hi)
+        contract_id = self.resolve_contract(contract_id)
         if contract_id:
             events = [e for e in events if e.contract_id == contract_id]
         return {"events": [
@@ -240,10 +287,16 @@ class Agent:
             for e in events[:20]]}
 
     def _tool_contract_facts(self, contract_id: str | None = None):
+        wanted = self.resolve_contract(contract_id)
+        if contract_id and wanted is None:
+            # Say what DOES exist rather than returning nothing, which the
+            # model reads as "this contract is not in the system".
+            return {"contracts": [], "error": f"No contract matching "
+                    f"{contract_id!r}.", "known": self._known_contracts()}
         out = []
         for bundle in self.bundles:
             c = bundle.contract
-            if contract_id and c.id != contract_id:
+            if wanted and c.id != wanted:
                 continue
             profile = bundle.result().risk
             out.append({
@@ -260,9 +313,11 @@ class Agent:
     def _tool_exit_cost(self, contract_id: str, exit_date: str):
         from api.findings.termination import termination_cost
 
-        bundle = next((b for b in self.bundles if b.contract.id == contract_id), None)
+        resolved = self.resolve_contract(contract_id)
+        bundle = next((b for b in self.bundles if b.contract.id == resolved), None)
         if bundle is None:
-            return {"error": f"unknown contract {contract_id}"}
+            return {"error": f"No contract matching {contract_id!r}.",
+                    "known": self._known_contracts()}
         try:
             when = date.fromisoformat(exit_date)
         except ValueError:

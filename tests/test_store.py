@@ -117,3 +117,49 @@ def test_an_older_database_is_migrated_not_broken(tmp_path):
     s = Store(url=None, sqlite_path=path, tenant="t1")
     assert "contract_id" in s._columns("documents")
     s.close()
+
+
+def test_two_tenants_can_hold_the_same_contract_id(bundle, tmp_path):
+    """The primary key was `id` alone, so one tenant's write DISPLACED
+    another's. It cost a contract from the running service when the test suite
+    ran against the same database, and the loss was silent."""
+    import json as _json
+
+    payload = _json.dumps(bundle.to_payload())
+    a = Store(url=os.environ.get("DATABASE_URL"),
+              sqlite_path=tmp_path / "shared.db", tenant="tenant_a")
+    b = Store(url=os.environ.get("DATABASE_URL"),
+              sqlite_path=tmp_path / "shared.db", tenant="tenant_b")
+    try:
+        a.delete_contract(bundle.contract.id)
+        b.delete_contract(bundle.contract.id)
+
+        a.save_contract(bundle.contract, payload)
+        b.save_contract(bundle.contract, payload)      # must not raise
+
+        assert a.contract_ids() == [bundle.contract.id]
+        assert b.contract_ids() == [bundle.contract.id]
+
+        a.delete_contract(bundle.contract.id)
+        assert a.contract_ids() == []
+        assert b.contract_ids() == [bundle.contract.id]   # untouched
+    finally:
+        a.delete_contract(bundle.contract.id)
+        b.delete_contract(bundle.contract.id)
+        a.close(); b.close()
+
+
+def test_documents_are_also_tenant_scoped(bundle, tmp_path):
+    a = Store(url=os.environ.get("DATABASE_URL"),
+              sqlite_path=tmp_path / "shared2.db", tenant="doc_a")
+    b = Store(url=os.environ.get("DATABASE_URL"),
+              sqlite_path=tmp_path / "shared2.db", tenant="doc_b")
+    try:
+        doc = bundle.docs[0]
+        a.save_document(doc, contract_id="k1")
+        b.save_document(doc, contract_id="k1")
+        assert len(a.documents_for("k1")) == 1
+        assert len(b.documents_for("k1")) == 1
+    finally:
+        a.delete_contract("k1"); b.delete_contract("k1")
+        a.close(); b.close()

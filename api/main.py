@@ -56,7 +56,7 @@ _store = Store(tenant=TENANT)
 _vectors = VectorIndex(namespace=os.environ.get("TENANT", "demo"))
 _state: dict = {"bundles": [], "gaps": [], "today": date.today(),
                 "upload_checks": [], "last_upload": {}, "ask_index": None,
-                "retriever": None}
+                "retriever": None, "skipped": []}
 
 
 @asynccontextmanager
@@ -94,15 +94,22 @@ def boot(today: date) -> None:
     service can be restarted (or replaced) without losing a user's work.
     """
     _state["today"] = today
-    restored = []
+    restored, skipped = [], []
     for contract_id in _store.contract_ids():
         payload = _store.get_contract(contract_id)
         if not payload or "documents" not in payload:
-            continue                       # pre-persistence row; ignore
+            skipped.append((contract_id, "stored before analysis was persisted"))
+            continue
         try:
             restored.append(ContractBundle.from_payload(payload))
-        except Exception:                  # a schema change, not a user error
-            continue
+        except Exception as exc:           # schema drift, not a user error
+            # Silence here is dangerous: a dropped contract becomes "that
+            # contract does not exist" in an answer, stated as fact. Record it
+            # and surface it on /system instead.
+            skipped.append((contract_id, f"{type(exc).__name__}: {exc}"))
+    _state["skipped"] = skipped
+    for contract_id, why in skipped:
+        print(f"[boot] could not restore {contract_id}: {why}", flush=True)
 
     if restored:
         _state["bundles"] = restored
@@ -115,7 +122,8 @@ def boot(today: date) -> None:
     _refresh_portfolio()
     _store.audit("system", "boot", None,
                  f"{len(_state['bundles'])} contracts "
-                 f"({'restored' if restored else 'seeded'})")
+                 f"({'restored' if restored else 'seeded'}), "
+                 f"{len(skipped)} skipped")
 
 
 def persist(bundle) -> None:
@@ -454,6 +462,8 @@ def system_info():
         "vectors": _vectors.stats(),
         "contracts": len(_state["bundles"]),
         "restored_from_storage": bool(_state.get("restored")),
+        "skipped_on_boot": [{"contract_id": c, "reason": w}
+                            for c, w in _state.get("skipped", [])],
         "retrieval": _retriever().stats,
     }
 
@@ -519,19 +529,14 @@ def calendar(start: str | None = Query(None), end: str | None = Query(None),
 @app.post("/ask")
 def post_ask(question: str = Form(...), contract_id: str | None = Form(None)):
     """Answer from the extracted layer only. Never from the raw contract."""
-    from api.ask import Index, ask, build_records
+    from api.ask import ask
 
     question = (question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="question is required")
 
-    index = _state.get("ask_index")
-    if index is None:
-        index = Index(build_records(_state["bundles"], _state["gaps"], _today()))
-        _state["ask_index"] = index
-
     try:
-        answer = ask(question, index, contract_id=contract_id or None)
+        answer = ask(question, _retriever(), contract_id=contract_id or None)
     except ExtractionUnavailable as exc:
         raise HTTPException(status_code=503, detail=f"Ask unavailable: {exc}")
     except Exception as exc:

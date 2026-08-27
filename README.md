@@ -188,6 +188,37 @@ three bad rows is more credible than one with none.
 | PII/pricing redaction before egress | **Not implemented** — design only |
 | Per-tenant encryption keys | **Not implemented** — design only |
 
+## Ask and the agent
+
+Retrieval *finds*; these *answer*. Both run over the same hybrid retriever, so
+the two surfaces cannot disagree about what the documents say.
+
+| Surface | What it does |
+|---|---|
+| `/rag/search` | Ranked records and passages. No answer, no model |
+| `/ask` | One model call over retrieved, already-verified material |
+| `/agent/ask` | Plans, calls tools (`compare`, `exit_cost`, `deadlines`, …), answers |
+
+Three things they get right that a naive Q&A layer does not:
+
+**Direction.** "How fast must our *provider* tell us about a breach" and "how
+fast must we tell our *customer*" are the same subject and the opposite
+meaning. Records carry which side of the paper we are on, and the question's
+wording boosts that side. Getting this wrong produced a confident answer about
+the wrong party.
+
+That signal lives in **metadata, not in the text**. Writing "supplier vendor
+provider" into every buyer-side record made the word match all of them equally
+and buried the clause that actually answered the question.
+
+**The contract you named.** "Can we get out of the northwind deal early"
+scopes retrieval to Northwind. Without it, the answer came back quoting
+Vertex's termination clause — right subject, wrong agreement.
+
+**Names, not just ids.** Agent tools accept `"Northwind"` as well as
+`k_northwind`. A filter that silently matches nothing made the agent conclude
+the contract did not exist and report that to the user as fact.
+
 ## Ask
 
 Questions answered from the **extracted layer**, never from the raw contract.

@@ -115,6 +115,18 @@ def build_records(bundles, gaps, today: date) -> list[Record]:
         role = {OurRole.BUYER: "we buy from them",
                 OurRole.SELLER: "we sell to them",
                 OurRole.MUTUAL: "mutual"}.get(contract.our_role, "")
+        # Which side of the paper we are on. Without it, "how fast must our
+        # PROVIDER tell us about a breach" retrieves the clause where WE promise
+        # a customer 24 hours -- same subject, opposite direction, confidently
+        # wrong answer.
+        #
+        # This is carried in METADATA and applied as a ranking boost, not
+        # written into the searchable text. Stuffing "supplier vendor provider"
+        # into every buyer-side record made the word match all of them equally
+        # and buried the clause that actually answered the question.
+        side_label = {OurRole.BUYER: "their obligation to us (supplier contract)",
+                      OurRole.SELLER: "our obligation to them (customer contract)",
+                      OurRole.MUTUAL: "mutual"}.get(contract.our_role, "")
         facts = [f"{name} is a {contract.contract_type.value.upper()} where {role}."]
         if contract.effective_date:
             facts.append(f"Effective date {contract.effective_date.isoformat()}.")
@@ -128,7 +140,7 @@ def build_records(bundles, gaps, today: date) -> list[Record]:
             title=f"Key facts about the {name} agreement",
             body=" ".join(facts),
             meta={"annual_value": contract.annual_value,
-                  "role": contract.our_role.value},
+                  "role": contract.our_role.value, "side": contract.our_role.value},
         ))
 
         for claim in bundle.claims:
@@ -140,12 +152,13 @@ def build_records(bundles, gaps, today: date) -> list[Record]:
             records.append(Record(
                 id=claim.id, contract_id=cid, contract=name, kind="clause",
                 title=f"{label} — {name}",
-                body=f"{label}. {claim.clause_type.value}. "
+                body=f"{label}. {claim.clause_type.value}. {side_label}. "
                      f"Favours {claim.party_favored}. {fields}",
                 quote=claim.span.quote,
                 src_file=_file_of(bundle, claim.span.doc_id),
                 src_start=claim.span.char_start, src_end=claim.span.char_end,
-                meta={"clause_type": claim.clause_type.value, **claim.fields},
+                meta={"clause_type": claim.clause_type.value,
+                      "side": contract.our_role.value, **claim.fields},
             ))
 
         rules = {r.id: r for r in bundle.rules}
@@ -165,7 +178,8 @@ def build_records(bundles, gaps, today: date) -> list[Record]:
                 src_start=rule.span.char_start if rule else None,
                 src_end=rule.span.char_end if rule else None,
                 meta={"due": ob.due_date.isoformat(), "days": days,
-                      "obligation_kind": ob.kind, "anchor": ob.anchor},
+                      "obligation_kind": ob.kind, "anchor": ob.anchor,
+                      "side": contract.our_role.value},
             ))
 
         for finding in bundle.findings:
@@ -180,7 +194,8 @@ def build_records(bundles, gaps, today: date) -> list[Record]:
                           if finding.evidence else None),
                 src_start=finding.evidence[0].char_start if finding.evidence else None,
                 src_end=finding.evidence[0].char_end if finding.evidence else None,
-                meta={"severity": finding.severity, "finding_kind": finding.kind},
+                meta={"severity": finding.severity, "finding_kind": finding.kind,
+                      "side": contract.our_role.value},
             ))
 
     for gap in gaps:
@@ -274,6 +289,13 @@ _MONEY_WORDS = ("cost", "pay", "fee", "price", "spend", "value", "much",
                 "worth", "annual")
 
 
+# Words that pin a question to one side of the relationship.
+_SUPPLIER_WORDS = ("supplier", "provider", "vendor", "they give us",
+                   "we buy", "our provider", "upstream")
+_CUSTOMER_WORDS = ("customer", "client", "we promise", "we sell", "we give",
+                   "downstream", "we owe")
+
+
 def _boost(record: Record, question: str) -> float:
     """Structured nudges.
 
@@ -301,6 +323,12 @@ def _boost(record: Record, question: str) -> float:
         boost += 5.0
     if any(w in question for w in _MONEY_WORDS) and kind == "fact":
         boost += 1.5
+    side = record.meta.get("side")
+    if side:
+        if any(w in question for w in _SUPPLIER_WORDS):
+            boost += 6.0 if side == "buyer" else -5.0
+        elif any(w in question for w in _CUSTOMER_WORDS):
+            boost += 6.0 if side == "seller" else -5.0
     if record.contract:
         for token in record.contract.lower().replace("/", " ").split():
             if len(token) > 3 and token.strip(",.") in question:
@@ -334,12 +362,19 @@ RULES
    `cited_record_ids`; the quotes are attached to those records and are shown
    to the user automatically.
 3. Cite every record your answer depends on. Cite nothing you did not use.
-4. Answer in plain language, in two or three sentences. Give the specific
+4. If several contracts are relevant, cover them rather than picking one.
+   "Which of our suppliers..." is asking about all of them.
+5. Answer in plain language, in two or three sentences. Give the specific
    figure, date or clause the records contain rather than describing it. Say
    which contract each fact came from when more than one is involved.
-5. Dates and totals in the records were computed by code. Repeat them exactly;
+6. Dates and totals in the records were computed by code. Repeat them exactly;
    do not recalculate.
-6. You are decision support, not a lawyer. State what the documents say. Do not
+7. Direction matters. "Our provider / supplier / vendor" means a contract
+   where WE BUY -- their obligation to us. "Our customer / client" means a
+   contract where WE SELL -- our obligation to them. Each record says which it
+   is. Answering with the wrong side is the same subject and the opposite
+   meaning, so check before you answer.
+8. You are decision support, not a lawyer. State what the documents say. Do not
    advise whether to sign, and do not opine on enforceability.
 """
 
@@ -364,13 +399,59 @@ class Answer:
         }
 
 
+_GENERIC_NAME_TOKENS = {
+    "the", "and", "ltd", "limited", "inc", "llc", "plc", "gmbh", "corp",
+    "company", "systems", "group", "partners", "holdings", "cloud",
+    "services", "financial", "technologies", "international",
+}
+
+
+def infer_contract(question: str, retriever) -> str | None:
+    """The contract a question names, if it names exactly one.
+
+    Matches on distinctive tokens of the counterparty name -- "northwind",
+    "acme" -- ignoring the corporate furniture ("Systems", "Ltd", "Group")
+    that several counterparties share. Returns None when the question names
+    none or more than one, so an ambiguous question still searches everything.
+    """
+    lowered = f" {question.lower()} "
+    matched: set[str] = set()
+    for record in getattr(retriever, "records", []):
+        if not record.contract_id or not record.contract:
+            continue
+        # A cross-contract gap names BOTH parties under one contract id, so it
+        # makes every such question look ambiguous. Skip them here.
+        if record.kind == "gap":
+            continue
+        for token in record.contract.lower().replace("/", " ").split():
+            token = token.strip(",.()")
+            if len(token) <= 3 or token in _GENERIC_NAME_TOKENS:
+                continue
+            if f" {token} " in lowered or f" {token}'" in lowered:
+                matched.add(record.contract_id)
+                break
+    return matched.pop() if len(matched) == 1 else None
+
+
 def ask(
     question: str,
-    index: Index,
+    retriever,
     contract_id: str | None = None,
     top_k: int = TOP_K,
 ) -> Answer:
-    hits = index.rank(question, top_k=top_k, contract_id=contract_id)
+    """Answer from retrieved, already-verified material.
+
+    `retriever` is the hybrid Retriever, so Ask and the agent search the same
+    way. Ask used to run BM25 over records only, which meant the two surfaces
+    could give different answers to the same question -- and Ask missed
+    anything phrased differently from the contract ("tell us" vs "notify").
+    """
+    # A question that names a contract is asking about THAT contract. Without
+    # this, "can we get out of the northwind deal early" retrieved Vertex's
+    # termination clause -- a confident answer about the wrong agreement.
+    contract_id = contract_id or infer_contract(question, retriever)
+
+    hits = retriever.search(question, k=top_k, contract_id=contract_id)
     if not hits:
         return Answer(
             question=question,
@@ -379,8 +460,8 @@ def ask(
             missing="No verified record matched the question.", considered=0,
         )
 
-    by_id = {record.id: record for record, _ in hits}
-    payload = [record.for_model() for record, _ in hits]
+    by_id = {hit.id: hit.payload for hit in hits}
+    payload = [hit.payload.for_model() for hit in hits]
     user = (
         f"Question: {question}\n\n"
         f"Records ({len(payload)}), each already verified against its source "

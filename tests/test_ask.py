@@ -29,6 +29,17 @@ def index(records):
     return Index(records)
 
 
+@pytest.fixture(scope="module")
+def retriever(portfolio):
+    """Ask answers through the same hybrid retriever the agent uses."""
+    from api.rag import Retriever
+    from api.vectors import NullBackend, VectorIndex
+
+    bundles, gaps = portfolio
+    return Retriever(bundles, gaps, date(2026, 8, 27),
+                     vectors=VectorIndex("t", backend=NullBackend()))
+
+
 # ── the index ────────────────────────────────────────────────────────────
 
 def test_every_record_type_is_indexed(records):
@@ -99,53 +110,53 @@ def _fake(monkeypatch, **fields):
     monkeypatch.setattr(ask_mod, "complete_json", fake_complete_json)
 
 
-def test_answer_resolves_citations_to_real_records(index, monkeypatch):
+def test_answer_resolves_citations_to_real_records(index, retriever, monkeypatch):
     real_id = index.rank("when does northwind renew?", top_k=1)[0][0].id
     _fake(monkeypatch, answer="It renews in March.",
           cited_record_ids=[real_id], sufficient=True)
-    result = ask_mod.ask("when does northwind renew?", index)
+    result = ask_mod.ask("when does northwind renew?", retriever)
     assert result.sufficient
     assert len(result.citations) == 1
     assert result.citations[0]["record_id"] == real_id
 
 
-def test_fabricated_citation_ids_are_dropped(index, monkeypatch):
+def test_fabricated_citation_ids_are_dropped(index, retriever, monkeypatch):
     """The model emits ids, not quotes — an invented id cites nothing."""
     _fake(monkeypatch, answer="Something.",
           cited_record_ids=["totally-made-up-id", "another-fake"],
           sufficient=True)
-    result = ask_mod.ask("liability cap", index)
+    result = ask_mod.ask("liability cap", retriever)
     assert result.citations == []
 
 
-def test_insufficient_records_are_reported_not_papered_over(index, monkeypatch):
+def test_insufficient_records_are_reported_not_papered_over(index, retriever, monkeypatch):
     """Records were retrieved, but none answer the question. Say so."""
     _fake(monkeypatch, answer=None, cited_record_ids=[], sufficient=False,
           missing="the CEO's name")
-    result = ask_mod.ask("who is the CEO of northwind?", index)
+    result = ask_mod.ask("who is the CEO of northwind?", retriever)
     assert result.considered > 0          # the model WAS consulted
     assert result.sufficient is False
     assert "cannot answer" in result.answer or "not something" in result.answer
     assert result.missing == "the CEO's name"
 
 
-def test_no_matching_records_short_circuits_without_calling_the_model(index,
+def test_no_matching_records_short_circuits_without_calling_the_model(retriever,
                                                                      monkeypatch):
     def explode(*a, **k):
         raise AssertionError("the model must not be called with zero records")
 
     monkeypatch.setattr(ask_mod, "complete_json", explode)
-    result = ask_mod.ask("zqxjkv unrelated nonsense token", index)
+    result = ask_mod.ask("zqxjkv unrelated nonsense token", retriever)
     assert result.sufficient is False
     assert result.citations == []
     assert result.considered == 0
 
 
-def test_citations_carry_the_quote_and_offsets(index, monkeypatch):
+def test_citations_carry_the_quote_and_offsets(index, retriever, monkeypatch):
     hit = next(r for r, _ in index.rank("liability cap", top_k=8)
                if r.kind == "clause")
     _fake(monkeypatch, answer="x", cited_record_ids=[hit.id], sufficient=True)
-    citation = ask_mod.ask("liability cap", index).citations[0]
+    citation = ask_mod.ask("liability cap", retriever).citations[0]
     assert citation["quote"] == hit.quote
     assert citation["start"] == hit.src_start
     assert citation["file"] == hit.src_file
