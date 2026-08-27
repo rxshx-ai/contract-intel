@@ -408,8 +408,17 @@ def _retriever():
     from api.rag import Retriever
 
     if _state.get("retriever") is None:
-        _state["retriever"] = Retriever(_state["bundles"], _state["gaps"],
-                                        _today(), vectors=_vectors)
+        retriever = Retriever(_state["bundles"], _state["gaps"], _today(),
+                              vectors=_vectors)
+        # Index automatically when the vector store is empty or out of date, so
+        # hybrid retrieval works without anyone remembering to POST /vectors/sync.
+        # Idempotent: upserts overwrite by id.
+        if retriever.vectors.available:
+            expected = len(retriever.records) + len(retriever.passages)
+            held = retriever.vectors.stats().get("vectors", 0)
+            if held != expected:
+                retriever.sync_vectors()
+        _state["retriever"] = retriever
     return _state["retriever"]
 
 

@@ -6,11 +6,18 @@ from api.vectors import VectorIndex, enabled, reciprocal_rank_fusion
 
 
 @pytest.fixture(autouse=True)
-def no_key(monkeypatch):
+def no_backend(monkeypatch):
+    """Default these tests to no vector backend.
+
+    Without this they pick up the LOCAL backend whenever Ollama happens to be
+    running, so the suite would pass or fail depending on what is installed on
+    the machine. Tests that want a backend opt in explicitly.
+    """
     monkeypatch.delenv("PINECONE_API_KEY", raising=False)
+    monkeypatch.setenv("VECTOR_BACKEND", "none")
 
 
-def test_disabled_without_a_key():
+def test_disabled_when_no_backend_is_configured():
     assert enabled() is False
     index = VectorIndex()
     assert index.available is False
@@ -50,7 +57,7 @@ def test_sync_reports_why_it_did_nothing():
     r = Retriever(bundles, analyze_portfolio(bundles), date(2026, 8, 27))
     result = r.sync_vectors()
     assert result["enabled"] is False and result["synced"] == 0
-    assert "PINECONE_API_KEY" in result["reason"]
+    assert result["reason"]
 
 
 def test_vector_payload_covers_records_and_passages():
@@ -208,3 +215,136 @@ def test_agreement_between_both_rankings_wins(portfolio):
     hybrid = _retriever(portfolio, _StubVectors([second]))
     fused = hybrid.search("liability cap", k=8)
     assert fused[0].id == second
+
+
+# ── local backend ────────────────────────────────────────────────────────
+
+def _local(tmp_path, monkeypatch, vectors_by_text=None):
+    """A LocalBackend whose embedding call is replaced, so these tests need
+    neither Ollama nor a network."""
+    from api import vectors as vec
+
+    monkeypatch.setattr(vec, "LOCAL_STORE", tmp_path)
+    backend = vec.LocalBackend.__new__(vec.LocalBackend)
+    backend.namespace = "t"
+    backend.model = "fake"
+    backend.url = "http://fake"
+    backend.last_error = None
+    backend.ids, backend.meta, backend._matrix = [], [], None
+    backend.path = tmp_path / "t.json"
+    backend.available = True
+
+    table = vectors_by_text or {}
+
+    def embed(texts):
+        out = []
+        for t in texts:
+            out.append(table.get(t, [float(len(t) % 7), 1.0, 0.0]))
+        return out
+
+    backend.embed = embed
+    return backend
+
+
+def test_local_backend_upserts_and_searches(tmp_path, monkeypatch):
+    table = {"alpha": [1.0, 0.0, 0.0], "beta": [0.0, 1.0, 0.0],
+             "find alpha": [0.99, 0.1, 0.0]}
+    b = _local(tmp_path, monkeypatch, table)
+    assert b.upsert([{"id": "a", "text": "alpha", "contract_id": "k1"},
+                     {"id": "b", "text": "beta", "contract_id": "k2"}]) == 2
+    hits = b.search("find alpha", k=2)
+    assert hits[0].id == "a"
+    assert hits[0].score > hits[1].score
+
+
+def test_local_backend_upsert_is_idempotent(tmp_path, monkeypatch):
+    b = _local(tmp_path, monkeypatch)
+    item = {"id": "a", "text": "alpha", "contract_id": "k1"}
+    b.upsert([item]); b.upsert([item])
+    assert len(b.ids) == 1
+    assert b.stats()["vectors"] == 1
+
+
+def test_local_backend_filters_by_contract(tmp_path, monkeypatch):
+    b = _local(tmp_path, monkeypatch)
+    b.upsert([{"id": "a", "text": "alpha", "contract_id": "k1"},
+              {"id": "b", "text": "beta", "contract_id": "k2"}])
+    hits = b.search("anything", k=5, contract_id="k2")
+    assert [h.id for h in hits] == ["b"]
+
+
+def test_local_backend_deletes_a_contract(tmp_path, monkeypatch):
+    b = _local(tmp_path, monkeypatch)
+    b.upsert([{"id": "a", "text": "alpha", "contract_id": "k1"},
+              {"id": "b", "text": "beta", "contract_id": "k2"}])
+    b.delete_contract("k1")
+    assert b.ids == ["b"]
+    assert [h.id for h in b.search("anything", k=5)] == ["b"]
+
+
+def test_local_backend_persists_across_instances(tmp_path, monkeypatch):
+    from api import vectors as vec
+
+    b = _local(tmp_path, monkeypatch)
+    b.upsert([{"id": "a", "text": "alpha", "contract_id": "k1"}])
+
+    monkeypatch.setattr(vec, "LOCAL_STORE", tmp_path)
+    reopened = vec.LocalBackend.__new__(vec.LocalBackend)
+    reopened.namespace = "t"; reopened.path = tmp_path / "t.json"
+    reopened.ids, reopened.meta, reopened._matrix = [], [], None
+    reopened.last_error = None
+    reopened._load()
+    assert reopened.ids == ["a"]
+
+
+# ── backend selection ────────────────────────────────────────────────────
+
+def test_explicit_none_disables(monkeypatch):
+    from api.vectors import choose_backend
+
+    monkeypatch.setenv("VECTOR_BACKEND", "none")
+    assert choose_backend().available is False
+
+
+def test_pinecone_is_preferred_when_a_key_exists(monkeypatch):
+    from api.vectors import choose_backend
+
+    monkeypatch.setenv("VECTOR_BACKEND", "auto")
+    monkeypatch.setenv("PINECONE_API_KEY", "pc-test")
+    assert choose_backend().name == "pinecone"
+
+
+def test_falls_back_to_local_then_none(monkeypatch):
+    from api import vectors as vec
+
+    monkeypatch.setenv("VECTOR_BACKEND", "auto")
+    monkeypatch.delenv("PINECONE_API_KEY", raising=False)
+
+    class Dead(vec.LocalBackend):
+        def __init__(self, namespace="default", **kw):
+            self.namespace = namespace; self.last_error = "ollama down"
+            self.available = False
+
+    monkeypatch.setattr(vec, "LocalBackend", Dead)
+    assert vec.choose_backend().name == "none"
+
+
+# ── pinecone response parsing (no network) ───────────────────────────────
+
+def test_pinecone_hits_are_parsed_from_the_documented_shape():
+    """Guards the shape I got wrong first time: hits expose id/score/fields,
+    not _id/_score, and live under response.result.hits."""
+    from api.vectors import PineconeBackend, _hits, _attr
+
+    class Hit:
+        def __init__(self, i, s): self.id, self.score, self.fields = i, s, {"k": 1}
+
+    class Result:
+        hits = [Hit("a", 0.9), Hit("b", 0.5)]
+
+    class Response:
+        result = Result()
+
+    parsed = _hits(Response())
+    assert [_attr(h, "id") for h in parsed] == ["a", "b"]
+    assert _attr(parsed[0], "score") == 0.9
