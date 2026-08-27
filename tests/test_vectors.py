@@ -348,3 +348,186 @@ def test_pinecone_hits_are_parsed_from_the_documented_shape():
     parsed = _hits(Response())
     assert [_attr(h, "id") for h in parsed] == ["a", "b"]
     assert _attr(parsed[0], "score") == 0.9
+
+
+# ── pinecone path, exercised with a fake index ───────────────────────────
+# No key is needed: a fake Index records what was sent and replays matches, so
+# upsert shape, query shape and grounding are all covered. Only the network
+# round-trip is left unverified.
+
+class _FakePineconeIndex:
+    def __init__(self, matches=None):
+        self.upserted: list[dict] = []
+        self.queries: list[dict] = []
+        self.deleted: list[dict] = []
+        self._matches = matches or []
+
+    def upsert(self, *, vectors, namespace, **kw):
+        self.upserted.extend(vectors)
+        return {"upserted_count": len(vectors)}
+
+    def query(self, **kwargs):
+        self.queries.append(kwargs)
+
+        class Match:
+            def __init__(self, i, s, meta): self.id, self.score, self.metadata = i, s, meta
+
+        class Response:
+            matches = [Match(i, s, m) for i, s, m in self._matches]
+
+        return Response()
+
+    def delete(self, **kwargs):
+        self.deleted.append(kwargs)
+
+    def describe_index_stats(self):
+        return {"namespaces": {"t": {"vector_count": len(self.upserted)}}}
+
+
+class _FakeEmbedder:
+    available = True
+    last_error = None
+    model = "nomic-embed-text"
+    dimension = 4
+
+    def __init__(self):
+        self.embedded: list[str] = []
+
+    def embed(self, texts):
+        self.embedded.extend(texts)
+        return [[float(len(t) % 5), 1.0, 0.0, 0.5] for t in texts]
+
+
+def _pinecone(monkeypatch, matches=None):
+    from api import vectors as vec
+
+    monkeypatch.setenv("PINECONE_API_KEY", "pc-test")
+    embedder = _FakeEmbedder()
+    backend = vec.PineconeBackend("t", embedder=embedder)
+    backend._index = _FakePineconeIndex(matches)
+    return backend, backend._index, embedder
+
+
+def test_pinecone_stores_our_own_vectors_not_raw_text(monkeypatch):
+    """Vectors come from our embedder, so dev and production share a space."""
+    backend, index, embedder = _pinecone(monkeypatch)
+    n = backend.upsert([{"id": "a", "text": "a clause", "contract_id": "k1",
+                         "kind": "clause"}])
+    assert n == 1
+    assert embedder.embedded == ["a clause"]          # embedded locally
+    record = index.upserted[0]
+    assert record["id"] == "a"
+    assert len(record["values"]) == 4                 # a vector, not text
+    assert record["metadata"]["contract_id"] == "k1"
+
+
+def test_pinecone_query_sends_a_vector_and_a_scope_filter(monkeypatch):
+    backend, index, embedder = _pinecone(monkeypatch, [("a", 0.9, {})])
+    backend.search("does it renew", k=5, contract_id="k1")
+    sent = index.queries[-1]
+    assert sent["top_k"] == 5
+    assert len(sent["vector"]) == 4
+    assert sent["filter"] == {"contract_id": {"$eq": "k1"}}
+    assert sent["namespace"] == "t"
+    assert "does it renew" in embedder.embedded
+
+
+def test_pinecone_matches_are_parsed(monkeypatch):
+    backend, _, _ = _pinecone(monkeypatch, [("a", 0.91, {"kind": "clause"}),
+                                            ("b", 0.42, {})])
+    hits = backend.search("x", k=2)
+    assert [(h.id, round(h.score, 2)) for h in hits] == [("a", 0.91), ("b", 0.42)]
+
+
+def test_pinecone_batches_large_upserts(monkeypatch):
+    from api.vectors import BATCH
+
+    backend, index, _ = _pinecone(monkeypatch)
+    items = [{"id": f"i{n}", "text": f"clause {n}", "contract_id": "k1"}
+             for n in range(BATCH + 25)]
+    assert backend.upsert(items) == len(items)
+    assert len(index.upserted) == len(items)
+
+
+def test_pinecone_needs_a_working_embedder(monkeypatch):
+    from api import vectors as vec
+
+    class Dead:
+        available = False
+        last_error = "Ollama unreachable"
+        model = "nomic-embed-text"
+
+    monkeypatch.setenv("PINECONE_API_KEY", "pc-test")
+    backend = vec.PineconeBackend("t", embedder=Dead())
+    assert backend.available is False
+    assert "embedder is not" in backend.last_error
+
+
+# ── grounding: the property that must survive the vector store ───────────
+
+def test_a_vector_hit_is_grounded_through_the_local_layer(monkeypatch):
+    """Pinecone returns an id. The quote shown comes from OUR verified record,
+    never from Pinecone's metadata."""
+    from datetime import date
+
+    from api import demo
+    from api.pipeline import analyze_portfolio
+    from api.rag import Retriever
+    from api.vectors import VectorHit, VectorIndex
+
+    bundles = demo.load(date(2026, 8, 27))
+    gaps = analyze_portfolio(bundles)
+    plain = Retriever(bundles, gaps, date(2026, 8, 27))
+    target = next(r for r in plain.records if r.kind == "clause" and r.quote)
+
+    class Tampered:
+        """Returns the right id with a LIE in the metadata."""
+        available = True
+        last_error = None
+
+        def search(self, query, k=10, contract_id=None):
+            return [VectorHit(id=target.id, score=0.99,
+                              metadata={"text": "THIS TEXT IS NOT IN ANY DOCUMENT"})]
+
+        def stats(self): return {"enabled": True}
+
+    hybrid = Retriever(bundles, gaps, date(2026, 8, 27),
+                       vectors=VectorIndex("t", backend=Tampered()))
+    hit = next(h for h in hybrid.search("liability", k=8) if h.id == target.id)
+
+    quote = hit.citation()["quote"]
+    assert quote == target.quote
+    assert "NOT IN ANY DOCUMENT" not in str(hit.citation())
+
+    docs = {d.id: d for b in bundles for d in b.docs}
+    doc = docs[target.src_file and next(
+        d.id for d in docs.values() if d.filename == target.src_file)]
+    assert doc.text[target.src_start:target.src_end] == quote
+
+
+def test_vector_hits_for_unknown_ids_are_never_rendered(monkeypatch):
+    """A stale vector from a deleted contract must not become a citation."""
+    from datetime import date
+
+    from api import demo
+    from api.pipeline import analyze_portfolio
+    from api.rag import Retriever
+    from api.vectors import VectorHit, VectorIndex
+
+    bundles = demo.load(date(2026, 8, 27))
+    gaps = analyze_portfolio(bundles)
+
+    class Stale:
+        available = True
+        last_error = None
+
+        def search(self, query, k=10, contract_id=None):
+            return [VectorHit(id="cl_deleted_long_ago", score=0.99, metadata={})]
+
+        def stats(self): return {"enabled": True}
+
+    r = Retriever(bundles, gaps, date(2026, 8, 27),
+                  vectors=VectorIndex("t", backend=Stale()))
+    hits = r.search("liability cap", k=6)
+    assert hits
+    assert all(h.id in r.by_id for h in hits)

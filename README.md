@@ -364,49 +364,66 @@ another's contracts.
 
 ### Vectors
 
-`api/vectors.py`. Three backends behind one interface, chosen by
-`VECTOR_BACKEND` or auto-detected:
+Embeddings are generated **locally with `nomic-embed-text` (768-dim) via
+Ollama**, for both backends:
 
-| Backend | When | Notes |
+| Backend | When | Role |
 |---|---|---|
-| `pinecone` | `PINECONE_API_KEY` set | Integrated inference — text is upserted, Pinecone embeds server-side |
-| `local` | Ollama reachable | `nomic-embed-text` + cosine in-process. No account, no network beyond localhost |
-| `none` | neither | BM25 only; every method a no-op so callers never branch |
+| `pinecone` | `PINECONE_API_KEY` set | Vector **storage**. We send our own vectors |
+| `local` | Ollama reachable | Storage and search in-process, persisted to `.vectors/` |
+| `none` | neither | BM25 only; every method a no-op |
 
-Vectors sit **alongside** BM25, not in place of it:
+**Not Pinecone integrated inference.** Integrated inference embeds server-side
+with their hosted model, which would mean one vector space in production and a
+different one locally — retrieval you cannot reproduce or debug on your own
+machine. Generating vectors ourselves keeps the two identical, and the index
+dimension is probed from the embedder rather than hardcoded, because a mismatch
+rejects every upsert.
 
-- **BM25** — exact terms and numbers. "99.9%", "forty-five (45) days". An
-  embedding ranks 99.99% beside 99.9%, which is the distinction a contract
-  question turns on.
-- **Vectors** — paraphrase. Real measured example: *"can they put the price up
-  without telling us"*. BM25 latches onto "telling" and returns **breach
-  notification** clauses — the wrong clause entirely. Hybrid promotes *"Price
-  increases are not capped at a stated percentage"* to first.
+#### Grounding survives the vector store
 
-Fused with **Reciprocal Rank Fusion**, which uses position only. BM25 scores
-are unbounded and cosine is bounded; a numeric blend needs a calibration that
-drifts whenever either side moves.
+Pinecone holds an **id, a vector, and a little metadata**. The text stored
+alongside is for debugging in their console and is **never what the user sees**.
+Every hit is resolved back through the local verified layer, so a displayed
+quote is always one checked character-for-character against the source
+document. An id the vector store returns that we do not recognise — a stale
+vector from a deleted contract, say — is dropped rather than rendered.
 
-Indexing happens automatically the first time retrieval is used, and is
-idempotent. 200 items embed in ~7 seconds locally.
+There is a test for exactly this: a vector backend that returns the right id
+with **falsified metadata**, asserting the rendered quote is the verified one
+and the lie never reaches the output.
 
-```bash
-ollama pull nomic-embed-text     # local backend, no account needed
-curl localhost:8077/system       # which backends this process is using
-curl -X POST localhost:8077/vectors/sync
+Measured end to end on the real corpus:
+
+```
+Q: "how fast do they have to warn us after a security incident"
+  [clause] Northwind Observability, Inc.
+    "Provider shall notify Customer of any confirmed breach of Customer Data..."
+    GROUNDED: True  (msa_northwind.txt chars 2780-2952)
 ```
 
-**Verified:** the local backend runs end to end with real embeddings — 200
-items indexed, hybrid retrieval measurably better than BM25 on paraphrase.
-**The Pinecone HTTP calls have still never executed** (no key available). The
-SDK usage was checked against the installed client rather than recalled, which
-caught two real errors: `upsert_records` is keyword-only, and hits expose
-`id`/`score`/`fields` under `response.result.hits`, not `_id`/`_score`.
+Vectors are fused with BM25 by **Reciprocal Rank Fusion** (position only — BM25
+scores are unbounded, cosine is bounded, so a numeric blend needs a calibration
+that drifts). Indexing is automatic and idempotent on first retrieval; 200
+items embed in ~7 seconds.
 
-**Is a vector DB warranted?** At 200 items for 4 contracts, and ~15,000 at 300
-contracts, this is not a scale problem — the local backend handles it in
-milliseconds. Vectors earn their place for *paraphrase recall*, not speed.
-Pinecone is the answer when the corpus outgrows one process, not before.
+```bash
+ollama pull nomic-embed-text
+export PINECONE_API_KEY=...        # optional: storage instead of local
+curl localhost:8077/system
+```
+
+**Verified:** local backend end to end with real embeddings; the Pinecone
+upsert/query shapes exercised against a fake index (vector payloads, scope
+filters, batching, match parsing). **Unverified:** the Pinecone network calls
+themselves — no key has been available. The SDK usage was checked against the
+installed client, which caught three real errors (`upsert`/`query` are
+keyword-only, and matches expose `id`/`score`/`metadata`).
+
+**Is a vector DB warranted?** At ~15,000 items for 300 contracts this is not a
+scale problem — the local backend does it in milliseconds. Vectors earn their
+place for *paraphrase recall*, not speed. Pinecone is for when the corpus
+outgrows one process.
 
 ## Deploying to AWS
 

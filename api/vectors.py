@@ -49,6 +49,56 @@ OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 LOCAL_STORE = pathlib.Path(os.environ.get("VECTOR_STORE", ".vectors"))
 
 
+class OllamaEmbedder:
+    """nomic-embed-text via Ollama. The SAME model feeds the local index and
+    Pinecone, so a query embedded here matches vectors written from here.
+
+    Using Pinecone's integrated inference instead would mean their hosted model
+    in production and this one in development -- two different vector spaces,
+    and retrieval quality you cannot reproduce locally.
+    """
+
+    def __init__(self, model: str = OLLAMA_EMBED_MODEL, url: str = OLLAMA_URL):
+        self.model = model
+        self.url = url.rstrip("/")
+        self.last_error: str | None = None
+        self._dimension: int | None = None
+        self.available = self._probe()
+
+    def _probe(self) -> bool:
+        try:
+            with urllib.request.urlopen(f"{self.url}/api/tags", timeout=3) as r:
+                tags = json.loads(r.read())
+            names = {m.get("name", "").split(":")[0] for m in tags.get("models", [])}
+            if self.model.split(":")[0] not in names:
+                self.last_error = (f"Ollama is running but '{self.model}' is not "
+                                   f"pulled. Run: ollama pull {self.model}")
+                return False
+            return True
+        except Exception as exc:                       # noqa: BLE001
+            self.last_error = f"Ollama unreachable at {self.url} ({type(exc).__name__})"
+            return False
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        out: list[list[float]] = []
+        for text in texts:
+            body = json.dumps({"model": self.model, "prompt": text}).encode()
+            req = urllib.request.Request(
+                f"{self.url}/api/embeddings", data=body,
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                out.append(json.loads(r.read())["embedding"])
+        return out
+
+    @property
+    def dimension(self) -> int:
+        """Probed once. Pinecone needs it at index creation and it must match
+        the vectors written later, or every upsert is rejected."""
+        if self._dimension is None:
+            self._dimension = len(self.embed(["dimension probe"])[0])
+        return self._dimension
+
+
 @dataclass
 class VectorHit:
     id: str
@@ -100,45 +150,21 @@ class LocalBackend:
     name = "local"
 
     def __init__(self, namespace: str = "default",
-                 model: str = OLLAMA_EMBED_MODEL, url: str = OLLAMA_URL):
+                 embedder: "OllamaEmbedder | None" = None):
         self.namespace = namespace
-        self.model = model
-        self.url = url.rstrip("/")
-        self.last_error: str | None = None
+        self.embedder = embedder or OllamaEmbedder()
+        self.model = self.embedder.model
+        self.last_error = self.embedder.last_error
         self.ids: list[str] = []
         self.meta: list[dict[str, Any]] = []
         self._matrix = None
         self.path = LOCAL_STORE / f"{namespace}.json"
-        self.available = self._probe()
+        self.available = self.embedder.available
         if self.available:
             self._load()
 
-    def _probe(self) -> bool:
-        try:
-            with urllib.request.urlopen(f"{self.url}/api/tags", timeout=3) as r:
-                tags = json.loads(r.read())
-            names = {m.get("name", "").split(":")[0] for m in tags.get("models", [])}
-            if self.model.split(":")[0] not in names:
-                self.last_error = (f"Ollama is running but '{self.model}' is not "
-                                   f"pulled. Run: ollama pull {self.model}")
-                return False
-            return True
-        except Exception as exc:                       # noqa: BLE001
-            self.last_error = f"Ollama unreachable at {self.url} ({type(exc).__name__})"
-            return False
-
-    # ---- embedding ----------------------------------------------------
-
     def embed(self, texts: list[str]) -> list[list[float]]:
-        out: list[list[float]] = []
-        for text in texts:
-            body = json.dumps({"model": self.model, "prompt": text}).encode()
-            req = urllib.request.Request(
-                f"{self.url}/api/embeddings", data=body,
-                headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=60) as r:
-                out.append(json.loads(r.read())["embedding"])
-        return out
+        return self.embedder.embed(texts)
 
     # ---- persistence ---------------------------------------------------
 
@@ -247,16 +273,39 @@ class LocalBackend:
 # --------------------------------------------------------------------------
 
 class PineconeBackend:
+    """Pinecone as pure vector storage. Embeddings come from OllamaEmbedder.
+
+    Deliberately NOT Pinecone integrated inference. Integrated inference embeds
+    server-side with their hosted model, which would mean one vector space in
+    production and a different one locally -- retrieval you cannot reproduce or
+    debug on your machine. Generating vectors ourselves keeps both identical.
+
+    GROUNDING: Pinecone stores an id, a vector, and a little metadata. The text
+    it holds is for debugging only and is NEVER what the user sees. Every hit
+    is resolved back through the local verified layer (Retriever.by_id), so a
+    displayed quote is always one that was checked character-for-character
+    against the source document. An id Pinecone returns that we do not
+    recognise is dropped, not rendered.
+    """
+
     name = "pinecone"
 
-    def __init__(self, namespace: str = "default", index_name: str = INDEX_NAME):
+    def __init__(self, namespace: str = "default", index_name: str = INDEX_NAME,
+                 embedder: "OllamaEmbedder | None" = None):
         self.namespace = namespace
         self.index_name = index_name
+        self.embedder = embedder or OllamaEmbedder()
         self._index = None
         self.last_error: str | None = None
-        self.available = bool(os.environ.get("PINECONE_API_KEY", "").strip())
-        if not self.available:
+        if not os.environ.get("PINECONE_API_KEY", "").strip():
+            self.available = False
             self.last_error = "no PINECONE_API_KEY"
+        elif not self.embedder.available:
+            self.available = False
+            self.last_error = (f"Pinecone is configured but the embedder is not: "
+                               f"{self.embedder.last_error}")
+        else:
+            self.available = True
 
     def connect(self) -> bool:
         if not self.available:
@@ -264,14 +313,18 @@ class PineconeBackend:
         if self._index is not None:
             return True
         try:
-            from pinecone import Pinecone
+            from pinecone import Pinecone, ServerlessSpec
 
             pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
             names = {i["name"] for i in pc.list_indexes()}
             if self.index_name not in names:
-                pc.create_index_for_model(
-                    name=self.index_name, cloud=CLOUD, region=REGION,
-                    embed={"model": EMBED_MODEL, "field_map": {"text": "text"}},
+                # Dimension must match the embedder exactly or every upsert is
+                # rejected; it is probed rather than hardcoded.
+                pc.create_index(
+                    name=self.index_name,
+                    dimension=self.embedder.dimension,
+                    metric="cosine",
+                    spec=ServerlessSpec(cloud=CLOUD, region=REGION),
                 )
             self._index = pc.Index(self.index_name)
             return True
@@ -280,52 +333,39 @@ class PineconeBackend:
             self.available = False
             return False
 
+    # ---- writes --------------------------------------------------------
+
     def upsert(self, items: list[dict[str, Any]]) -> int:
-        if not self.connect():
+        if not self.connect() or not items:
             return 0
-        written, batch = 0, []
-        for item in items:
-            text = (item.get("text") or "").strip()
-            if not text:
+        written = 0
+        for start in range(0, len(items), BATCH):
+            chunk = [i for i in items[start:start + BATCH]
+                     if (i.get("text") or "").strip()]
+            if not chunk:
                 continue
-            record = {k: v for k, v in item.items() if v is not None}
-            record["_id"] = record.pop("id")
-            record["text"] = text[:MAX_TEXT_CHARS]
-            batch.append(record)
-            if len(batch) >= BATCH:
-                written += self._flush(batch); batch = []
-        if batch:
-            written += self._flush(batch)
+            try:
+                vectors = self.embedder.embed(
+                    [i["text"][:MAX_TEXT_CHARS] for i in chunk])
+            except Exception as exc:                   # noqa: BLE001
+                self.last_error = f"embedding failed: {type(exc).__name__}: {exc}"
+                return written
+            payload = []
+            for item, vector in zip(chunk, vectors):
+                metadata = {k: v for k, v in item.items()
+                            if k not in ("id", "text") and v is not None}
+                # Kept for debugging in the Pinecone console. Never displayed --
+                # the user always sees the verified local copy.
+                metadata["text"] = item["text"][:400]
+                payload.append({"id": item["id"], "values": vector,
+                                "metadata": metadata})
+            try:
+                self._index.upsert(vectors=payload, namespace=self.namespace)
+                written += len(payload)
+            except Exception as exc:                   # noqa: BLE001
+                self.last_error = f"{type(exc).__name__}: {exc}"
+                return written
         return written
-
-    def _flush(self, batch: list[dict[str, Any]]) -> int:
-        try:
-            # Keyword-only in the SDK; a positional call raises TypeError.
-            self._index.upsert_records(records=batch, namespace=self.namespace)
-            return len(batch)
-        except Exception as exc:                       # noqa: BLE001
-            self.last_error = f"{type(exc).__name__}: {exc}"
-            return 0
-
-    def search(self, query: str, k: int = 10,
-               contract_id: str | None = None) -> list[VectorHit]:
-        if not self.connect() or not query.strip():
-            return []
-        kwargs: dict[str, Any] = {
-            "namespace": self.namespace,
-            "top_k": k,
-            "inputs": {"text": query},
-        }
-        if contract_id:
-            kwargs["filter"] = {"contract_id": {"$eq": contract_id}}
-        try:
-            response = self._index.search(**kwargs)
-        except Exception as exc:                       # noqa: BLE001
-            self.last_error = f"{type(exc).__name__}: {exc}"
-            return []
-        return [VectorHit(id=_attr(h, "id"), score=float(_attr(h, "score") or 0.0),
-                          metadata=_attr(h, "fields") or {})
-                for h in _hits(response)]
 
     def delete_contract(self, contract_id: str) -> None:
         if not self.connect():
@@ -336,6 +376,32 @@ class PineconeBackend:
         except Exception as exc:                       # noqa: BLE001
             self.last_error = f"{type(exc).__name__}: {exc}"
 
+    # ---- reads ---------------------------------------------------------
+
+    def search(self, query: str, k: int = 10,
+               contract_id: str | None = None) -> list[VectorHit]:
+        if not self.connect() or not query.strip():
+            return []
+        try:
+            vector = self.embedder.embed([query])[0]
+        except Exception as exc:                       # noqa: BLE001
+            self.last_error = f"embedding failed: {type(exc).__name__}: {exc}"
+            return []
+        kwargs: dict[str, Any] = {
+            "vector": vector, "top_k": k, "namespace": self.namespace,
+            "include_metadata": True,
+        }
+        if contract_id:
+            kwargs["filter"] = {"contract_id": {"$eq": contract_id}}
+        try:
+            response = self._index.query(**kwargs)
+        except Exception as exc:                       # noqa: BLE001
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return []
+        return [VectorHit(id=_attr(m, "id"), score=float(_attr(m, "score") or 0.0),
+                          metadata=_attr(m, "metadata") or {})
+                for m in (_attr(response, "matches") or [])]
+
     def stats(self) -> dict[str, Any]:
         if not self.connect():
             return {"enabled": False, "backend": "pinecone",
@@ -345,7 +411,9 @@ class PineconeBackend:
             namespaces = _attr(described, "namespaces") or {}
             ns = namespaces.get(self.namespace)
             return {"enabled": True, "backend": "pinecone", "index": self.index_name,
-                    "model": EMBED_MODEL, "namespace": self.namespace,
+                    "model": self.embedder.model,
+                    "dimension": self.embedder.dimension,
+                    "namespace": self.namespace,
                     "vectors": (_attr(ns, "vector_count") if ns else 0) or 0}
         except Exception as exc:                       # noqa: BLE001
             return {"enabled": False, "backend": "pinecone",
@@ -376,19 +444,30 @@ def _hits(response: Any) -> list[Any]:
 # facade
 # --------------------------------------------------------------------------
 
-def choose_backend(namespace: str = "default") -> Backend:
+def choose_backend(namespace: str = "default",
+                   embedder: "OllamaEmbedder | None" = None) -> Backend:
+    """Both backends share one embedder: the vectors must come from the same
+    model, or a query embedded locally would not match what is stored."""
     requested = os.environ.get("VECTOR_BACKEND", "auto").strip().lower()
 
     if requested in ("none", "off", "disabled"):
         return NullBackend("VECTOR_BACKEND=none")
+
+    embedder = embedder or OllamaEmbedder()
+
     if requested == "pinecone":
-        return PineconeBackend(namespace)
+        return PineconeBackend(namespace, embedder=embedder)
     if requested == "local":
-        return LocalBackend(namespace)
+        return LocalBackend(namespace, embedder=embedder)
 
     if os.environ.get("PINECONE_API_KEY", "").strip():
-        return PineconeBackend(namespace)
-    local = LocalBackend(namespace)
+        pinecone = PineconeBackend(namespace, embedder=embedder)
+        if pinecone.available:
+            return pinecone
+        # A Pinecone key with no working embedder is a misconfiguration worth
+        # surfacing rather than silently downgrading.
+        return NullBackend(pinecone.last_error or "pinecone unavailable")
+    local = LocalBackend(namespace, embedder=embedder)
     return local if local.available else NullBackend(local.last_error or "no backend")
 
 
