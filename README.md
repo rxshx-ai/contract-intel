@@ -341,6 +341,36 @@ which is what the tests and the offline demo use.
 | `DATABASE_URL` | Postgres instead of SQLite |
 | `PINECONE_API_KEY` | Semantic retrieval fused with BM25 |
 
+### Running it all locally
+
+Nothing has to leave your machine. The model is the only optional network call,
+and even that is cached.
+
+```bash
+./deploy/local-db.sh start                    # Postgres + pgvector, in .pgdata/
+export DATABASE_URL="$(./deploy/local-db.sh url)"
+ollama pull nomic-embed-text                  # embeddings, local
+.venv/bin/uvicorn api.main:app --port 8077
+```
+
+The cluster lives in `.pgdata/` **inside the project**, listens on **55432**
+over a unix socket with `listen_addresses=''`, and registers no service. It
+cannot collide with a Postgres you already run, nothing listens on a TCP port,
+and `rm -rf .pgdata` removes every trace.
+
+```
+./deploy/local-db.sh start | stop | status | psql | url | reset
+```
+
+Verified on this setup: 4 contracts and 200 vectors stored, server restarted,
+**everything restored and no re-embedding**. Storage is ~49 MB.
+
+Prefer Docker? `docker compose up -d` gives the same thing on port 5433.
+
+**Zero-setup alternative:** with no `DATABASE_URL` the service uses SQLite plus
+a `.vectors/` file. Fewer moving parts, but no HNSW index and two stores instead
+of one. Fine for the demo, and it is what the test suite uses.
+
 ### Postgres
 
 `api/store.py` speaks both engines behind one interface. The interesting change

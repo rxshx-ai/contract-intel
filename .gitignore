@@ -8,3 +8,5 @@ contract_intel.db
 *.db-wal
 *.db-shm
 .vectors/
+.pgdata/
+.pgsock/
