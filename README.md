@@ -211,6 +211,69 @@ embeddings means changing `Index.rank()` and nothing else.
 POST /ask   question=... [&contract_id=...]
 ```
 
+## Retrieval layer (RAG)
+
+Two indexes behind one search surface (`api/rag.py`):
+
+| Index | What it holds |
+|---|---|
+| **Records** | the extracted layer — clauses, computed deadlines, findings, absences, gaps. Already verified and comparable. |
+| **Passages** | the contract text, chunked at clause boundaries, each carrying absolute offsets. |
+
+Records answer *"what is the liability cap"*; passages answer wording no clause
+type covers — "Overdue amounts accrue interest at 1.5% per month" was never
+extracted as a clause but is retrievable. Both are grounded: a passage IS a
+slice of the document, so anything retrieved can be quoted with real offsets.
+Two properties are tested: **no text is lost** between passages, and short
+sections are merged forward rather than dropped (a bare 16-char heading
+outranks real clauses under BM25 length normalisation).
+
+Ranking is BM25 plus structured boosts, with per-contract diversification so a
+comparison question does not get one contract's passages filling every slot.
+Groq serves no embedding model; swapping in vectors means changing
+`Retriever.search` and nothing above it. `GET /rag/search?q=...`
+
+## Agent
+
+`api/agent.py` plans, calls tools, and answers with citations.
+`POST /agent/ask`
+
+- **Plans first.** The plan is a separate structured call, not a tool — forcing
+  `tool_choice` to a named function makes gpt-oss emit a call to an internal
+  channel name (`commentary`, `json`) that Groq then rejects. The plan is shown
+  to the user.
+- **Comparison is a tool, not a judgement.** `compare` returns a computed table
+  across contracts with the wording behind every figure. Party-aware: a 99.99%
+  uptime commitment is a protection from a supplier and an exposure to a
+  customer, so ranking flips with which side we are on and never mixes the two
+  into one league table.
+- **Silence is reported.** A contract that states nothing appears under
+  `not_stated`, never as a good value.
+- **Citations cannot be faked.** `finish` returns record ids; ids that do not
+  resolve are dropped.
+- **Bounded.** Repeat calls reuse the earlier result, steps are capped, and
+  every call goes through the shared TPM budget.
+- **Salvage.** When a finish call is emitted under the wrong tool name, the
+  arguments are recovered rather than losing a completed run. This fires in
+  practice — the UI labels it "recovered from a malformed tool call".
+
+Tools: `search` · `compare` · `deadlines` · `calendar` · `contract_facts` ·
+`exit_cost` · `finish`
+
+## Calendar
+
+`api/calendar.py`, `GET /calendar` — three kinds of date, deliberately kept apart:
+
+| Source | Meaning |
+|---|---|
+| `system` | when we ingested the file |
+| `computed` | deadlines derived from relative wording. None appear in any document |
+| `quoted` | dates written literally in the text, grounded to a span |
+
+**A date in the text is not a deadline.** Conflating them is how "the contract
+says 31 December" becomes a notice window that actually closed 60 days earlier.
+Only computed events are marked actionable.
+
 ## Front end
 
 The UI is the Claude Design export, wired to the API rather than rebuilt:

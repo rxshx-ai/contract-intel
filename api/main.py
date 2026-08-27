@@ -50,7 +50,8 @@ ACTOR = "demo@contoso.example"
 
 _conn = db.connect()
 _state: dict = {"bundles": [], "gaps": [], "today": date.today(),
-                "upload_checks": [], "last_upload": {}, "ask_index": None}
+                "upload_checks": [], "last_upload": {}, "ask_index": None,
+                "retriever": None}
 
 
 @asynccontextmanager
@@ -77,6 +78,7 @@ def _bundle(contract_id: str):
 def _refresh_portfolio() -> None:
     _state["gaps"] = analyze_portfolio(_state["bundles"])
     _state["ask_index"] = None      # rebuilt lazily on the next question
+    _state["retriever"] = None
 
 
 def load_demo(today: date) -> None:
@@ -356,6 +358,72 @@ def deadlines_ics():
         ]
     lines.append("END:VCALENDAR")
     return PlainTextResponse("\r\n".join(lines), media_type="text/calendar")
+
+
+def _retriever():
+    from api.rag import Retriever
+
+    if _state.get("retriever") is None:
+        _state["retriever"] = Retriever(_state["bundles"], _state["gaps"], _today())
+    return _state["retriever"]
+
+
+@app.get("/rag/search")
+def rag_search(q: str = Query(...), k: int = Query(8),
+               contract_id: str | None = Query(None)):
+    """The retrieval layer on its own: verified records plus verbatim passages."""
+    hits = _retriever().search(q, k=k, contract_id=contract_id)
+    return {
+        "query": q,
+        "index": _retriever().stats,
+        "hits": [{**h.citation(), "score": round(h.score, 3), "type": h.kind}
+                 for h in hits],
+    }
+
+
+@app.post("/agent/ask")
+def agent_ask(question: str = Form(...), max_steps: int = Form(5)):
+    """Planning, tool-using agent over the verified layer."""
+    from api.agent import Agent
+
+    question = (question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+    agent = Agent(_state["bundles"], _state["gaps"], _retriever(), _today())
+    try:
+        result = agent.run(question, max_steps=max(2, min(6, max_steps)))
+    except ExtractionUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"Agent unavailable: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=502,
+                            detail=f"Agent failed against {llm_model()}: {exc}")
+    db.audit(_conn, TENANT, ACTOR, "agent", None, question[:200])
+    return result.to_dict()
+
+
+@app.get("/calendar")
+def calendar(start: str | None = Query(None), end: str | None = Query(None),
+             contract_id: str | None = Query(None),
+             group: str = Query("month")):
+    """Document arrival dates, computed deadlines, and dates written in the text."""
+    from api.calendar import build_calendar, by_month, in_range, summary
+
+    events = build_calendar(_state["bundles"], _today())
+    try:
+        lo = date.fromisoformat(start) if start else None
+        hi = date.fromisoformat(end) if end else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="dates must be YYYY-MM-DD")
+    events = in_range(events, lo, hi)
+    if contract_id:
+        events = [e for e in events if e.contract_id == contract_id]
+    payload = {"today": _today().isoformat(),
+               "summary": summary(events, _today())}
+    if group == "month":
+        payload["months"] = by_month(events, _today())
+    else:
+        payload["events"] = [e.to_dict(_today()) for e in events]
+    return payload
 
 
 @app.post("/ask")

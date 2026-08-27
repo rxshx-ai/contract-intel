@@ -50,11 +50,14 @@ let CONTRACTS = [], OBLIGATIONS = [], FINDINGS = [], GAPS = [];
 let INJECTIONS = [], EVAL = [], COVERAGE = [], COVERAGE_COLS = [];
 let UPLOAD_CHECKS = [], STATS = {}, EVAL_STATS = {}, AS_OF = '';
 
+function CAL_SUM(st) { return (st.calendar && st.calendar.summary) || {}; }
+
 const ASK_SUGGESTIONS = [
   'When does Northwind renew, and what is the deadline to stop it?',
   'Where are we exposed across contracts?',
   'What is missing from the Helios NDA?',
-  'What would it cost to leave Northwind early?'
+  'What would it cost to leave Northwind early?',
+  'Which contract locks us in the longest?'
 ];
 
 // Static on purpose: this describes OUR pipeline, not any contract's data.
@@ -244,7 +247,7 @@ patch(
     "drawerFinding:null, openOb:null, win:'90', sev:'all', "
     "role:'finance', exitDate:'2027-03-31', "
     "loaded:false, err:null, uploading:false, uploadMsg:'', exitCost:null, "
-    "askQuestion:'', asking:false, askResult:null };",
+    "askQuestion:'', asking:false, askResult:null, calendar:null };",
 )
 patch(
     "fetch on mount",
@@ -255,7 +258,12 @@ patch(
     "exit refetch when the date or contract changes",
     "componentDidUpdate(pp, ps) { if (ps.sel !== this.state.sel || "
     "ps.drawerFinding !== this.state.drawerFinding) this.scrollToSel(); }",
-    "componentDidUpdate(pp, ps) { if (ps.sel !== this.state.sel || "
+    "componentDidUpdate(pp, ps) { "
+    "/* The runtime calls this with prevProps only, so prevState is undefined. "
+    "   The design assumed two arguments; unguarded it throws on every state "
+    "   change and silently breaks re-render. */ "
+    "ps = ps || {}; "
+    "if (ps.sel !== this.state.sel || "
     "ps.drawerFinding !== this.state.drawerFinding) this.scrollToSel(); "
     "if (this.state.loaded && (ps.exitDate !== this.state.exitDate || "
     "ps.cid !== this.state.cid)) this.loadExit(); }",
@@ -311,6 +319,23 @@ ASK_VIEW = """
           </sc-for>
         </div>
 
+        <sc-if value="{{ askHasPlan }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:24px 32px 4px;border-top:1px solid var(--color-divider)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:12px">How it worked it out</div>
+            <sc-for list="{{ askPlan }}" as="p" hint-placeholder-count="3">
+              <div style="display:grid;grid-template-columns:34px 1fr;gap:14px;padding:8px 0;align-items:baseline">
+                <div style="font-size:13px;font-variant-numeric:tabular-nums;color:color-mix(in srgb,var(--color-text) 40%,transparent)">{{ p.n }}</div>
+                <div style="font-size:15px;line-height:1.55">{{ p.text }}</div>
+              </div>
+            </sc-for>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+              <sc-for list="{{ askSteps }}" as="s" hint-placeholder-count="3">
+                <span class="tag" style="{{ s.style }}">{{ s.label }}</span>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
         <sc-if value="{{ askHasAnswer }}" hint-placeholder-val="{{ true }}">
           <div style="padding:28px 32px 8px">
             <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:12px">{{ askQuestionEcho }}</div>
@@ -358,6 +383,91 @@ patch(
     "ask nav entry",
     "      { beat: 'Proof', items: [navItem('eval', 'Accuracy')] }",
     "      { beat: 'Proof', items: [navItem('eval', 'Accuracy')] },\n"
+    "      { beat: 'Ask', items: [navItem('ask', 'Ask a question')] }",
+)
+
+
+
+# ── 8. Calendar: when documents arrived and every date inside them ────────
+
+CALENDAR_VIEW = """
+    <!-- ══════ CALENDAR ══════ -->
+    <sc-if value="{{ isCalendar }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding:36px 32px 28px;border-bottom:2px solid var(--color-divider)">
+          <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:14px">Calendar</div>
+          <h2 style="margin:0 0 12px;font-size:32px">Every date we hold</h2>
+          <p style="margin:0;font-size:16px;line-height:1.65;max-width:840px;color:color-mix(in srgb,var(--color-text) 75%,transparent)">Three kinds of date, kept apart on purpose. When each document reached us. Deadlines we worked out from the wording. And dates written in the text &mdash; which are <em>not</em> deadlines, and treating them as if they were is how a notice window gets missed by sixty days.</p>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:2px solid var(--color-divider)">
+          <div style="padding:24px 32px">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:10px">Needs a decision</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:44px;line-height:1;font-variant-numeric:tabular-nums;color:var(--color-accent)">{{ calActionable }}</div>
+            <div style="font-size:13.5px;margin-top:8px">{{ calActionableNote }}</div>
+          </div>
+          <div style="padding:24px 32px;border-left:2px solid var(--color-divider)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:10px">Documents received</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:44px;line-height:1;font-variant-numeric:tabular-nums">{{ calDocuments }}</div>
+            <div style="font-size:13.5px;margin-top:8px">each stamped when we first read it</div>
+          </div>
+          <div style="padding:24px 32px;border-left:2px solid var(--color-divider)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:10px">Worked out by us</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:44px;line-height:1;font-variant-numeric:tabular-nums">{{ calComputed }}</div>
+            <div style="font-size:13.5px;margin-top:8px">none of these appear in any document</div>
+          </div>
+          <div style="padding:24px 32px;border-left:2px solid var(--color-divider)">
+            <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 55%,transparent);margin-bottom:10px">Written in the text</div>
+            <div style="font-family:var(--font-heading);font-weight:800;font-size:44px;line-height:1;font-variant-numeric:tabular-nums">{{ calWritten }}</div>
+            <div style="font-size:13.5px;margin-top:8px">quoted, with the line they sit on</div>
+          </div>
+        </div>
+
+        <sc-for list="{{ calendarMonths }}" as="m" hint-placeholder-count="4">
+          <div>
+            <div style="display:flex;align-items:baseline;gap:14px;padding:22px 32px 12px;border-top:2px solid var(--color-divider);background:var(--color-surface)">
+              <h4 style="margin:0;font-size:20px">{{ m.label }}</h4>
+              <span style="font-size:13.5px;color:color-mix(in srgb,var(--color-text) 55%,transparent)">{{ m.note }}</span>
+            </div>
+            <sc-for list="{{ m.events }}" as="e" hint-placeholder-count="3">
+              <div onClick="{{ e.open }}" style="display:grid;grid-template-columns:118px 150px 1fr 130px;gap:20px;padding:16px 32px;border-top:1px solid var(--color-divider);align-items:baseline;cursor:pointer" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+                <div style="font-size:14.5px;font-variant-numeric:tabular-nums;color:{{ e.dateColor }}">{{ e.dateLabel }}</div>
+                <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-family:var(--font-heading);font-weight:800;color:{{ e.sourceColor }}">{{ e.sourceLabel }}</div>
+                <div>
+                  <div style="font-size:15.5px;line-height:1.5">{{ e.title }}</div>
+                  <div style="font-size:13.5px;margin-top:5px;color:color-mix(in srgb,var(--color-text) 62%,transparent)">{{ e.detail }}</div>
+                  <sc-if value="{{ e.hasQuote }}" hint-placeholder-val="{{ false }}">
+                    <div style="border-left:2px solid var(--color-accent);padding:3px 0 3px 12px;margin-top:7px;font-size:14px;font-style:italic">&ldquo;{{ e.quote }}&rdquo;</div>
+                  </sc-if>
+                </div>
+                <div style="text-align:right;font-size:13.5px;color:{{ e.dateColor }};font-variant-numeric:tabular-nums">{{ e.daysLabel }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+"""
+
+patch("calendar view markup", "    <!-- ══════ UPLOAD ══════ -->",
+      CALENDAR_VIEW + "\n    <!-- ══════ UPLOAD ══════ -->")
+
+patch(
+    "calendar loads on navigation",
+    "    const go = function (v) { return function () "
+    "{ self.setState({ view: v }); }; };",
+    "    const go = function (v) {\n"
+    "      return function () {\n"
+    "        if (v === 'calendar') self.loadCalendar();\n"
+    "        self.setState({ view: v });\n"
+    "      };\n"
+    "    };",
+)
+
+patch(
+    "calendar nav entry",
+    "      { beat: 'Ask', items: [navItem('ask', 'Ask a question')] }",
+    "      { beat: 'Dates', items: [navItem('calendar', 'Calendar')] },\n"
     "      { beat: 'Ask', items: [navItem('ask', 'Ask a question')] }",
 )
 
@@ -474,7 +584,7 @@ LIVE_METHODS = """
     this.setState({ asking: true, askQuestion: q });
     const body = new FormData();
     body.append('question', q);
-    fetch(API + '/ask', { method: 'POST', body: body })
+    fetch(API + '/agent/ask', { method: 'POST', body: body })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
         if (!res.ok) throw new Error(res.d.detail || 'ask failed');
@@ -485,6 +595,15 @@ LIVE_METHODS = """
           question: q, answer: 'Could not reach the analysis API: ' + err.message,
           citations: [], sufficient: false, missing: '', considered: 0 } });
       });
+  }
+
+  loadCalendar() {
+    const self = this;
+    if (this.state.calendar) return;
+    fetch(API + '/calendar')
+      .then(function (r) { return r.json(); })
+      .then(function (d) { self.setState({ calendar: d }); })
+      .catch(function () {});
   }
 
   onPickFile(e) {
@@ -525,6 +644,9 @@ RENDER_PRELUDE = """    // ── WIRED: nothing renders until the API has answe
                docSegs: [], exitLines: [], pipelineSteps: [], uploadChecks: [],
                isAsk: false, askHasAnswer: false, askCitations: [],
                askSuggestions: [], askQuestion: '', askButtonLabel: 'Ask',
+               askHasPlan: false, askPlan: [], askSteps: [],
+               isCalendar: false, calendarMonths: [], calActionable: '—',
+               calDocuments: '—', calComputed: '—', calWritten: '—',
                asOfLabel: this.state.err ? 'Cannot reach the analysis API' : 'Loading…',
                deadlineHeadline: this.state.err ? 'The analysis API is not responding'
                                                 : 'Reading your contracts…',
@@ -575,6 +697,44 @@ EXTRA_VALS = """      // ── WIRED: values that used to be written into the d
       uploadStatus: this.state.uploadMsg || '',
       onPickFile: this.onPickFile.bind(this),
 
+      // ── WIRED: Calendar
+      isCalendar: st.view === 'calendar',
+      calActionable: String(CAL_SUM(st).actionable || 0),
+      calActionableNote: (CAL_SUM(st).overdue || 0) > 0
+        ? CAL_SUM(st).overdue + ' already past their date'
+        : 'nothing has gone past its date',
+      calDocuments: String(CAL_SUM(st).documents || 0),
+      calComputed: String(CAL_SUM(st).computed || 0),
+      calWritten: String(CAL_SUM(st).written_in_documents || 0),
+      calendarMonths: ((st.calendar && st.calendar.months) || []).map(function (m) {
+        return {
+          label: m.label,
+          note: m.count + ' date' + (m.count === 1 ? '' : 's')
+                + (m.actionable ? ' · ' + m.actionable + ' needing a decision' : ''),
+          events: m.events.map(function (e) {
+            const urgent = e.actionable && e.days <= 30;
+            return {
+              dateLabel: self.fmt(e.date),
+              dateColor: e.overdue ? 'var(--color-accent)'
+                         : (urgent ? 'var(--color-accent)' : 'var(--color-text)'),
+              sourceLabel: e.source === 'system' ? 'Received'
+                           : (e.source === 'computed' ? 'Worked out' : 'In the text'),
+              sourceColor: e.source === 'computed' ? 'var(--color-accent-700)'
+                           : 'color-mix(in srgb,var(--color-text) 45%,transparent)',
+              title: e.label + ' — ' + e.contract,
+              detail: e.detail || '',
+              hasQuote: !!e.quote,
+              quote: e.quote || '',
+              daysLabel: e.overdue ? Math.abs(e.days) + 'd ago'
+                         : (e.days === 0 ? 'today' : 'in ' + e.days + 'd'),
+              open: function () {
+                if (e.contract_id) self.setState({ view: 'detail', cid: e.contract_id });
+              }
+            };
+          })
+        };
+      }),
+
       // ── WIRED: Ask
       isAsk: st.view === 'ask',
       askQuestion: st.askQuestion || '',
@@ -586,18 +746,35 @@ EXTRA_VALS = """      // ── WIRED: values that used to be written into the d
       askSuggestions: ASK_SUGGESTIONS.map(function (q) {
         return { label: q, go: function () { self.runAsk(q); } };
       }),
+      askHasPlan: !!(st.askResult && st.askResult.plan && st.askResult.plan.length),
+      askPlan: ((st.askResult && st.askResult.plan) || []).map(function (t, i) {
+        return { n: String(i + 1).padStart(2, '0'), text: t };
+      }),
+      askSteps: ((st.askResult && st.askResult.steps) || []).map(function (s) {
+        return {
+          label: s.tool + (s.summary ? ' · ' + s.summary : ''),
+          style: s.ok
+            ? 'background:color-mix(in srgb,var(--color-text) 8%,transparent);color:var(--color-text);font-size:11.5px;padding:3px 10px'
+            : 'background:var(--color-accent-100);color:var(--color-accent-700);font-size:11.5px;padding:3px 10px'
+        };
+      }),
       askHasAnswer: !!st.askResult,
       askQuestionEcho: st.askResult ? st.askResult.question : '',
       askAnswer: st.askResult ? st.askResult.answer : '',
-      askUnanswerable: !!(st.askResult && st.askResult.sufficient === false
-                          && st.askResult.missing),
-      askMissing: st.askResult && st.askResult.missing
-        ? 'The records do not cover ' + st.askResult.missing +
-          '. Rather than fill that in from what contracts usually say, we have left it out.'
+      askUnanswerable: !!(st.askResult && st.askResult.sufficient === false),
+      askMissing: st.askResult
+        ? (st.askResult.missing
+           ? 'The records do not cover ' + st.askResult.missing +
+             '. Rather than fill that in from what contracts usually say, we left it out.'
+           : 'The verified records do not answer this. Rather than fill the gap '
+             + 'from what contracts usually say, we left it out.')
         : '',
       askMeta: st.askResult
-        ? (st.askResult.considered + ' verified records were searched; ' +
-           st.askResult.citations.length + ' were used.')
+        ? ((st.askResult.steps || []).filter(function (x) {
+             return x.tool !== 'finish' && x.tool !== 'answer'; }).length
+           + ' lookup(s) over the verified layer; '
+           + (st.askResult.citations || []).length + ' record(s) cited.'
+           + (st.askResult.stopped_early ? ' Stopped before finishing.' : ''))
         : '',
       askCitationsLabel: st.askResult && st.askResult.citations.length
         ? 'What this rests on' : 'Nothing was cited',

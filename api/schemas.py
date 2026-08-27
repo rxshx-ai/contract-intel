@@ -8,7 +8,7 @@ Invariants encoded here:
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
 from typing import Any, Literal
 
@@ -118,6 +118,7 @@ class Document(BaseModel):
     id: str
     filename: str
     text: str
+    ingested_at: datetime | None = None   # when we first read this file
     pages: list[PageMark] = Field(default_factory=list)
     contract_type: ContractType = ContractType.UNKNOWN
     used_ocr: bool = False

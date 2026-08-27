@@ -98,6 +98,7 @@ def resolve_supersession(
     topic leaves the original in force -- which is how amendments actually work.
     """
     ordered = order_documents(docs)
+    doc_types = {d.id: d.contract_type for d in docs}
     by_type: dict[ClauseType, ClauseClaim] = {}
     lineage: dict[str, str] = {}
     all_claims: list[ClauseClaim] = []
@@ -108,13 +109,44 @@ def resolve_supersession(
             if claim.clause_type in _MULTI_INSTANCE:
                 continue
             previous = by_type.get(claim.clause_type)
-            if previous is not None and previous.span.doc_id != claim.span.doc_id:
+            if previous is not None and _supersedes(previous, claim, doc_types):
                 previous.superseded_by = claim.id
                 claim.supersedes = previous.id
                 lineage[claim.id] = previous.id
-            by_type[claim.clause_type] = claim
+                by_type[claim.clause_type] = claim
+            elif previous is None:
+                by_type[claim.clause_type] = claim
 
     return all_claims, lineage
+
+
+_MEASURED_FIELDS = ("amount", "days", "months", "percent", "uptime_percent")
+
+
+def _supersedes(previous: ClauseClaim, candidate: ClauseClaim,
+                doc_types: dict[str, ContractType]) -> bool:
+    """Does `candidate` actually replace `previous`?
+
+    Two guards, both learned from real extractions going wrong:
+
+    1. Only an AMENDMENT replaces anything. An Order Form adds commercial facts;
+       it does not rewrite the MSA. Without this, an Order Form line reading
+       "Annual Subscription Fee: USD 84,000" -- typed payment_terms because it
+       concerns payment -- silently deleted the real 45-day payment term.
+
+    2. The replacement must measure the same thing. A clause carrying only an
+       `amount` cannot supersede one carrying only `days`; they are not the same
+       provision even when the extractor gives them the same type.
+    """
+    if previous.span.doc_id == candidate.span.doc_id:
+        return False
+    if doc_types.get(candidate.span.doc_id) != ContractType.AMENDMENT:
+        return False
+    prev_fields = {k for k in _MEASURED_FIELDS if previous.fields.get(k) is not None}
+    new_fields = {k for k in _MEASURED_FIELDS if candidate.fields.get(k) is not None}
+    if prev_fields and new_fields and not (prev_fields & new_fields):
+        return False
+    return True
 
 
 def lineage_text(

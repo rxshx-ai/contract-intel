@@ -12,6 +12,7 @@ import hashlib
 import re
 import unicodedata
 import uuid
+from datetime import datetime, timezone
 
 from api.schemas import ContractType, Document, PageMark, Span
 
@@ -145,6 +146,7 @@ def ingest_pdf(path: str, filename: str | None = None) -> Document:
         contract_type=_guess_type(name, text),
         used_ocr=used_ocr,
         sha256=digest,
+        ingested_at=datetime.now(timezone.utc),
     )
 
 
@@ -158,6 +160,7 @@ def ingest_text(raw: str, filename: str = "pasted.txt") -> Document:
         pages=marks,
         contract_type=_guess_type(filename, text),
         sha256=hashlib.sha256(raw.encode()).hexdigest(),
+        ingested_at=datetime.now(timezone.utc),
     )
 
 
